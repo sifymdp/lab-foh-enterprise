@@ -1,0 +1,6 @@
+# macOS-native binaries in node_modules break inside the Linux image —
+# the build runs its own npm install.
+node_modules/
+dist/
+.vite/
+.env

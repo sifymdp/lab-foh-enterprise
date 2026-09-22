@@ -1,0 +1,778 @@
+/* ==========================================================================
+   KITCHEN DISPLAY SYSTEM (KDS) & STATION QUEUE STYLES
+   Unified Front-of-House Enterprise Design System
+   ========================================================================== */
+
+/* ── Page Layout & Wrappers ── */
+.kds-page-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  padding: 1.5rem;
+  max-width: 1600px;
+  margin: 0 auto;
+  min-height: calc(100vh - 80px);
+  color: var(--text, #0f172a);
+}
+
+/* ── Top Header Bar ── */
+.kds-top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid var(--border, #e2e8f0);
+}
+
+.kds-top-bar__left {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.kds-title-group {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.kds-title-group h2 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text, #0f172a);
+  letter-spacing: -0.02em;
+}
+
+.kds-view-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.65rem;
+  background: #f1f5f9;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted, #64748b);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.kds-top-bar__right {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  flex-wrap: wrap;
+}
+
+/* ── Stats Summary Badges ── */
+.kds-stat-pills {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.kds-stat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0.8rem;
+  border-radius: 8px;
+  font-size: 0.825rem;
+  font-weight: 600;
+  border: 1px solid var(--border, #e2e8f0);
+  background: var(--surface, #ffffff);
+}
+
+.kds-stat-pill__num {
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+
+.kds-stat-pill--received {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #b45309;
+}
+.kds-stat-pill--preparing {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+}
+.kds-stat-pill--ready {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+  color: #15803d;
+}
+
+/* ── View Switcher Button ── */
+.kds-switch-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.95rem;
+  border-radius: var(--radius, 10px);
+  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+  color: #ffffff;
+  border: 1px solid #334155;
+  font-size: 0.825rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+  transition: all 0.15s ease;
+}
+
+.kds-switch-btn:hover {
+  background: linear-gradient(135deg, #334155 0%, #1e293b 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.14);
+}
+
+.kds-switch-btn__icon {
+  font-size: 0.95rem;
+}
+
+/* ── Station Filter Container & Pills ── */
+.kds-station-filter-container {
+  display: flex;
+  align-items: center;
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+}
+
+.station-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  overflow-x: auto;
+  white-space: nowrap;
+  width: 100%;
+}
+
+.station-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.4rem 0.9rem;
+  border-radius: 9999px;
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e2e8f0);
+  color: var(--text-muted, #64748b);
+  font-size: 0.825rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.station-pill:hover {
+  background: var(--surface-2, #f8f9fb);
+  color: var(--text, #0f172a);
+  border-color: var(--border-strong, #cbd5e1);
+}
+
+.station-pill.active {
+  background: var(--primary, #c41e3a);
+  border-color: var(--primary, #c41e3a);
+  color: #ffffff;
+  box-shadow: 0 2px 6px rgba(196, 30, 58, 0.25);
+}
+
+/* ── Order Cards Grid (Station Display View) ── */
+.kds-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.kds-order-card {
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: var(--radius-lg, 14px);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(15, 23, 42, 0.06));
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  cursor: pointer;
+}
+
+.kds-order-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md, 0 4px 16px rgba(15, 23, 42, 0.08));
+}
+
+.kds-order-card--received {
+  border-top: 4px solid #f59e0b;
+}
+
+.kds-order-card--preparing {
+  border-top: 4px solid #3b82f6;
+}
+
+.kds-order-card--ready {
+  border-top: 4px solid #22c55e;
+}
+
+.kds-order-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.85rem 1rem;
+  background: var(--surface-2, #f8f9fb);
+  border-bottom: 1px solid var(--border, #e2e8f0);
+}
+
+.kds-order-card__ident {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.kds-order-card__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.kds-order-card__id {
+  font-size: 0.95rem;
+  color: var(--text, #0f172a);
+}
+
+.kds-order-card__table {
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 0.15rem 0.5rem;
+  background: #e2e8f0;
+  border-radius: 6px;
+  color: #334155;
+}
+
+.kds-order-card__badges {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.kds-source-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.kds-elapsed-badge {
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 0.18rem 0.5rem;
+  border-radius: 6px;
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.kds-elapsed-badge.is-warning {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.kds-elapsed-badge.is-late {
+  background: #fee2e2;
+  color: #dc2626;
+  animation: pulseWarning 1.5s infinite;
+}
+
+@keyframes pulseWarning {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.65; }
+}
+
+.kds-order-card__body {
+  padding: 0.85rem 1rem;
+  flex: 1;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.kds-order-card__item-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.kds-order-card__item-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.875rem;
+}
+
+.kds-order-card__item-qty {
+  font-weight: 800;
+  color: var(--primary, #c41e3a);
+  min-width: 22px;
+}
+
+.kds-order-card__item-name {
+  font-weight: 500;
+  color: var(--text, #0f172a);
+  flex: 1;
+}
+
+.kds-order-card__station-tag {
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 0.1rem 0.4rem;
+  background: #f1f5f9;
+  border-radius: 4px;
+  color: #64748b;
+  text-transform: uppercase;
+}
+
+.kds-order-card__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  background: var(--surface-2, #f8f9fb);
+  border-top: 1px solid var(--border, #e2e8f0);
+}
+
+.kds-order-card__count-hint {
+  font-size: 0.78rem;
+  color: var(--text-muted, #64748b);
+  font-weight: 500;
+}
+
+.kds-order-card__action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.45rem 1rem;
+  border-radius: var(--radius, 10px);
+  color: #ffffff;
+  border: none;
+  font-size: 0.825rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.1s;
+}
+
+.kds-order-card__action-btn:hover:not(:disabled) {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+.kds-order-card__action-btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+/* ── Kanban Board View (KDSPage) ── */
+.kds-board-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.kds-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: var(--radius, 10px);
+  padding: 0.65rem 1rem;
+}
+
+.kds-toolbar__info {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.kds-toolbar__title {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text, #0f172a);
+}
+
+.kds-toolbar__hint {
+  font-size: 0.825rem;
+  color: var(--text-muted, #64748b);
+}
+
+.kds-toolbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.kds-toolbar-btn {
+  background: var(--surface-2, #f8f9fb);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 6px;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-muted, #64748b);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.kds-toolbar-btn:hover {
+  background: var(--surface, #ffffff);
+  color: var(--text, #0f172a);
+  border-color: var(--border-strong, #cbd5e1);
+}
+
+.kds-toolbar-btn--active {
+  background: var(--text, #0f172a);
+  color: #ffffff;
+  border-color: var(--text, #0f172a);
+}
+
+/* 3-Column Kanban Layout */
+.kds-board {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.25rem;
+  min-height: 550px;
+}
+
+@media (max-width: 960px) {
+  .kds-board {
+    grid-template-columns: 1fr;
+  }
+}
+
+.kds-column {
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: var(--radius-lg, 14px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(15, 23, 42, 0.06));
+}
+
+.kds-column .column-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.85rem 1.1rem;
+  font-weight: 700;
+  font-size: 0.875rem;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--border, #e2e8f0);
+}
+
+.kds-column--received .column-header {
+  background: #fffbeb;
+  color: #b45309;
+  border-top: 4px solid #f59e0b;
+}
+
+.kds-column--preparing .column-header {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-top: 4px solid #3b82f6;
+}
+
+.kds-column--ready .column-header {
+  background: #f0fdf4;
+  color: #15803d;
+  border-top: 4px solid #22c55e;
+}
+
+.column-header .order-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 9999px;
+  background: rgba(0, 0, 0, 0.08);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.order-cards-list {
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  flex: 1;
+  overflow-y: auto;
+  max-height: 70vh;
+}
+
+.empty-column-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 140px;
+  color: var(--text-muted, #64748b);
+  font-size: 0.875rem;
+  font-style: italic;
+}
+
+/* ── Strip Card Layout (Inside Kanban Column) ── */
+.kds-card-strip {
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: var(--radius, 10px);
+  padding: 0.85rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(15, 23, 42, 0.06));
+}
+
+.kds-card-strip:hover {
+  border-color: var(--border-strong, #cbd5e1);
+  box-shadow: var(--shadow-md, 0 4px 16px rgba(15, 23, 42, 0.08));
+  transform: translateY(-1px);
+}
+
+.card-strip__main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.card-strip__left {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.card-strip__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.card-strip__order-id {
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--text, #0f172a);
+}
+
+.card-strip__table-badge {
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.15rem 0.45rem;
+  background: #f1f5f9;
+  border-radius: 4px;
+  color: #475569;
+}
+
+.card-strip__source-badge {
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 0.12rem 0.4rem;
+  border-radius: 4px;
+}
+
+.card-strip__preview {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.825rem;
+}
+
+.card-strip__item-count {
+  font-weight: 700;
+  color: var(--primary, #c41e3a);
+  flex-shrink: 0;
+}
+
+.card-strip__item-text {
+  color: var(--text-muted, #64748b);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-strip__action-bar {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 0.35rem;
+  border-top: 1px dashed var(--border, #e2e8f0);
+}
+
+.card-strip__action-btn-full {
+  width: 100%;
+  padding: 0.4rem 0.75rem;
+  border-radius: 6px;
+  border: none;
+  color: #ffffff;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.card-strip__action-btn-full:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+/* ── AI Operations Panel (KDSPage) ── */
+.ai-operations-panel {
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: var(--radius-lg, 14px);
+  padding: 1.1rem 1.35rem;
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(15, 23, 42, 0.06));
+}
+
+.ai-operations-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.85rem;
+}
+
+.ai-operations-header h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ai-operations-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.ai-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.95rem;
+  border-radius: var(--radius, 10px);
+  background: var(--surface-2, #f8f9fb);
+  border: 1px solid var(--border, #e2e8f0);
+  color: var(--text, #0f172a);
+  font-size: 0.825rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ai-btn:hover:not(:disabled) {
+  background: var(--surface, #ffffff);
+  border-color: var(--border-strong, #cbd5e1);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.ai-btn-primary {
+  background: #0f172a;
+  color: #ffffff;
+  border-color: #0f172a;
+}
+
+.ai-btn-primary:hover:not(:disabled) {
+  background: #334155;
+  border-color: #334155;
+}
+
+.ai-voice-input-group {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.ai-voice-input {
+  padding: 0.45rem 0.8rem;
+  border-radius: var(--radius, 10px);
+  border: 1px solid var(--border, #e2e8f0);
+  font-size: 0.825rem;
+  background: var(--surface, #ffffff);
+  color: var(--text, #0f172a);
+}
+
+.ai-operations-result {
+  margin-top: 0.75rem;
+  padding: 0.65rem 0.9rem;
+  border-radius: 8px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  font-size: 0.825rem;
+  color: #334155;
+}
+
+/* ── Completed Orders Panel ── */
+.completed-orders-panel {
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: var(--radius-lg, 14px);
+  padding: 1rem 1.25rem;
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(15, 23, 42, 0.06));
+}
+
+.completed-orders-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  background: none;
+  border: none;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text, #0f172a);
+  cursor: pointer;
+  padding: 0;
+}
+
+/* ── States: Loading, Empty, Errors ── */
+.kds-loading-box, .kds-empty-box, .kds-error-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 4rem 2rem;
+  text-align: center;
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: var(--radius-lg, 14px);
+  gap: 0.75rem;
+}
+
+.kds-empty-icon {
+  font-size: 3rem;
+  margin-bottom: 0.25rem;
+}
+
+.kds-alert-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.15rem;
+  border-radius: var(--radius, 10px);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.kds-alert-banner--error {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #dc2626;
+}
