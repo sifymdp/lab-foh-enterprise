@@ -242,6 +242,9 @@ def confirm(
     # -----------------------------------------
 
     if table:
+        table.status = "RESERVED"
+        db.commit()
+        db.refresh(table)
 
         emit_sync(
             "reservation.confirmed",

@@ -15,6 +15,12 @@ import { StatusActions } from './StatusActions'
 interface TableDetailPanelProps {
   floor: Floor
   table: Table
+  hasWaiterCall?: boolean
+  waiterCallState?: 'CALLING' | 'ON_IT' | boolean
+  reservation?: { id: string; guestName: string; partySize: number; reservedFor: string }
+  onDismissWaiterCall?: () => void
+  onOnItWaiterCall?: () => void
+  onResolveWaiterCall?: () => void
   onClose: () => void
   onSeatGuests: () => void
   onTakeOrder?: () => void
@@ -33,7 +39,19 @@ function aggregateItems(orders: Order[]) {
   return [...map.values()]
 }
 
-export function TableDetailPanel({ floor, table, onClose, onSeatGuests, onTakeOrder }: TableDetailPanelProps) {
+export function TableDetailPanel({
+  floor,
+  table,
+  hasWaiterCall,
+  waiterCallState,
+  reservation,
+  onDismissWaiterCall,
+  onOnItWaiterCall,
+  onResolveWaiterCall,
+  onClose,
+  onSeatGuests,
+  onTakeOrder,
+}: TableDetailPanelProps) {
   const navigate = useNavigate()
   const { user } = useAuth()
   const { sessions, changeStatus, closeSession, updateTable, deleteTable, refresh } = useFloor()
@@ -61,7 +79,6 @@ export function TableDetailPanel({ floor, table, onClose, onSeatGuests, onTakeOr
   const showOrders = ['ACTIVE', 'BILLING', 'PAID'].includes(table.status)
 
   useEffect(() => {
-    if (!showOrders) return
     let cancelled = false
     setOrdersLoading(true)
     ordersApi.list({ tableId: table.id })
@@ -69,7 +86,7 @@ export function TableDetailPanel({ floor, table, onClose, onSeatGuests, onTakeOr
       .catch(() => { if (!cancelled) setOrders([]) })
       .finally(() => { if (!cancelled) setOrdersLoading(false) })
     return () => { cancelled = true }
-  }, [table.id, showOrders])
+  }, [table.id])
 
   // Fetch or sync real live bill for this table session
   useEffect(() => {
@@ -94,8 +111,39 @@ export function TableDetailPanel({ floor, table, onClose, onSeatGuests, onTakeOr
     return () => { cancelled = true }
   }, [session?.id, table.id, table.number, table.status])
 
-  const items = aggregateItems(orders)
+  const pendingOrders = orders.filter((o) => o.approvalStatus === 'PENDING')
+  const approvedOrders = orders.filter((o) => o.approvalStatus !== 'REJECTED')
+  const items = aggregateItems(approvedOrders)
   const runningTotal = items.reduce((sum, i) => sum + i.price * i.qty, 0)
+  const [actionLoadingId, setActionLoadingId] = useState<string | null>(null)
+
+  const handleApproveOrder = async (orderId: string) => {
+    setActionLoadingId(orderId)
+    try {
+      await ordersApi.approve(orderId)
+      setOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, approvalStatus: 'APPROVED' } : o)))
+      await refresh()
+    } catch {
+      alert('Could not approve order')
+    } finally {
+      setActionLoadingId(null)
+    }
+  }
+
+  const handleRejectOrder = async (orderId: string) => {
+    const reason = window.prompt('Reason for rejecting order (optional):', 'Item unavailable')
+    if (reason === null) return
+    setActionLoadingId(orderId)
+    try {
+      await ordersApi.reject(orderId, reason)
+      setOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, approvalStatus: 'REJECTED' } : o)))
+      await refresh()
+    } catch {
+      alert('Could not reject order')
+    } finally {
+      setActionLoadingId(null)
+    }
+  }
 
   async function handleStatus(next: typeof table.status) {
     setStatusLoading(true)
@@ -250,6 +298,184 @@ export function TableDetailPanel({ floor, table, onClose, onSeatGuests, onTakeOr
           </div>
         )
       })()}
+
+      {/* ── Real-Time Waiter Call Alert ── */}
+      {hasWaiterCall && (
+        <div style={{
+          background: waiterCallState === 'ON_IT' ? '#fffbeb' : '#fef2f2',
+          border: `1.5px solid ${waiterCallState === 'ON_IT' ? '#f59e0b' : '#f87171'}`,
+          borderRadius: '10px',
+          padding: '10px 12px',
+          margin: '10px 0',
+          boxShadow: waiterCallState === 'ON_IT' ? '0 2px 8px rgba(245,158,11,0.15)' : '0 2px 8px rgba(239,68,68,0.2)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '1.3rem' }}>{waiterCallState === 'ON_IT' ? '🏃' : '🔔'}</span>
+              <div>
+                <strong style={{ color: waiterCallState === 'ON_IT' ? '#b45309' : '#dc2626', fontSize: '0.85rem', display: 'block' }}>
+                  {waiterCallState === 'ON_IT' ? 'Waiter Attending Table' : 'Waiter Called!'}
+                </strong>
+                <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                  {waiterCallState === 'ON_IT' ? 'Staff is on the way / assisting' : 'Customer requested assistance'}
+                </span>
+              </div>
+            </div>
+            <span
+              style={{
+                fontSize: '0.7rem',
+                fontWeight: 700,
+                padding: '2px 8px',
+                borderRadius: '999px',
+                background: waiterCallState === 'ON_IT' ? '#fef3c7' : '#fee2e2',
+                color: waiterCallState === 'ON_IT' ? '#92400e' : '#991b1b',
+              }}
+            >
+              {waiterCallState === 'ON_IT' ? 'ON IT' : 'NEEDS HELP'}
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+            {waiterCallState !== 'ON_IT' && onOnItWaiterCall && (
+              <button
+                type="button"
+                className="btn btn-sm"
+                style={{
+                  flex: 1,
+                  background: '#f59e0b',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '6px',
+                  fontWeight: 700,
+                  padding: '6px 12px',
+                  cursor: 'pointer',
+                  fontSize: '0.8rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '4px',
+                  boxShadow: '0 2px 4px rgba(245,158,11,0.3)',
+                }}
+                onClick={onOnItWaiterCall}
+              >
+                🏃 On It
+              </button>
+            )}
+            {(onResolveWaiterCall || onDismissWaiterCall) && (
+              <button
+                type="button"
+                className="btn btn-sm"
+                style={{
+                  flex: 1,
+                  background: '#16a34a',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '6px',
+                  fontWeight: 700,
+                  padding: '6px 12px',
+                  cursor: 'pointer',
+                  fontSize: '0.8rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '4px',
+                  boxShadow: '0 2px 4px rgba(22,163,74,0.3)',
+                }}
+                onClick={onResolveWaiterCall || onDismissWaiterCall}
+              >
+                ✓ Resolved
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Pending Orders Awaiting Waiter Approval ── */}
+      {pendingOrders.length > 0 && (
+        <div style={{
+          background: '#fffbeb',
+          border: '1.5px solid #fcd34d',
+          borderRadius: '10px',
+          padding: '10px 12px',
+          margin: '10px 0',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+            <strong style={{ color: '#b45309', fontSize: '0.85rem' }}>
+              ⏳ {pendingOrders.length} Order{pendingOrders.length > 1 ? 's' : ''} Need Approval
+            </strong>
+            <span style={{ fontSize: '0.7rem', background: '#fef3c7', color: '#92400e', padding: '2px 6px', borderRadius: '4px', fontWeight: 700 }}>
+              WAITER REVIEW
+            </span>
+          </div>
+          {pendingOrders.map((po) => (
+            <div key={po.id} style={{ background: '#ffffff', borderRadius: '8px', padding: '8px 10px', marginBottom: '8px', border: '1px solid #fde68a' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', fontWeight: 600, color: '#1e293b', marginBottom: '3px' }}>
+                <span>Order #{po.id.slice(-4)}</span>
+                <span>{po.items.reduce((acc, i) => acc + i.quantity, 0)} items</span>
+              </div>
+              <div style={{ fontSize: '0.76rem', color: '#64748b', marginBottom: '6px' }}>
+                {po.items.map((i) => `${i.quantity}× ${i.itemName}`).join(', ')}
+              </div>
+              {po.notes && (
+                <div style={{ fontSize: '0.75rem', color: '#b45309', fontStyle: 'italic', marginBottom: '6px' }}>
+                  Note: {po.notes}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-primary"
+                  style={{ flex: 1, background: '#16a34a', borderColor: '#16a34a', padding: '4px 8px', fontSize: '0.78rem' }}
+                  disabled={actionLoadingId === po.id}
+                  onClick={() => handleApproveOrder(po.id)}
+                >
+                  ✓ Approve (Send to Kitchen)
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-ghost"
+                  style={{ color: '#dc2626', borderColor: '#fca5a5', padding: '4px 8px', fontSize: '0.78rem' }}
+                  disabled={actionLoadingId === po.id}
+                  onClick={() => handleRejectOrder(po.id)}
+                >
+                  ✕ Reject
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── Reservation / Booking Notice ── */}
+      {reservation && (
+        <div style={{
+          background: '#eff6ff',
+          border: '1.5px solid #93c5fd',
+          borderRadius: '10px',
+          padding: '10px 12px',
+          margin: '10px 0',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+            <span style={{ fontWeight: 700, fontSize: '0.85rem', color: '#1e40af' }}>📅 Reserved: {reservation.guestName}</span>
+            <span style={{ fontSize: '0.75rem', background: '#dbeafe', color: '#1d4ed8', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>
+              {reservation.partySize} guests
+            </span>
+          </div>
+          <div style={{ fontSize: '0.76rem', color: '#475569', marginBottom: '8px' }}>
+            Time: {new Date(reservation.reservedFor).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </div>
+          {!session && canSeat && (
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              style={{ width: '100%', background: '#2563eb', borderColor: '#2563eb' }}
+              onClick={onSeatGuests}
+            >
+              Seat Reserved Guest
+            </button>
+          )}
+        </div>
+      )}
 
       <dl className="detail-list">
         <div>

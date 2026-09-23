@@ -81,9 +81,11 @@ export const menuApi = {
 export interface OrderItem { id: string; itemName: string; category?: string; unitPrice: number; quantity: number }
 export interface Order {
   id: string; sessionId: string; tableId: string
+  tableNumber?: string | null
   placedAt: string; status: string
   source?: 'bot' | 'waiter' | string
   approvalStatus?: 'PENDING' | 'APPROVED' | 'REJECTED' | string
+  notes?: string | null
   items: OrderItem[]
 }
 
@@ -102,8 +104,11 @@ export const ordersApi = {
     }),
   approve: (orderId: string) =>
     apiFetch<Order>(`/orders/${orderId}/approve`, { method: 'POST' }),
-  reject: (orderId: string) =>
-    apiFetch<Order>(`/orders/${orderId}/reject`, { method: 'POST' }),
+  reject: (orderId: string, reason?: string) =>
+    apiFetch<Order>(`/orders/${orderId}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    }),
 }
 
 // ─── Billing ─────────────────────────────────────────────────────────────────

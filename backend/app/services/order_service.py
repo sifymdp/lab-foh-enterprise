@@ -23,19 +23,35 @@ def _fmt_dt(dt: datetime) -> str:
     return dt.isoformat().replace("+00:00", "Z")
 
 
-def _order_to_out(order: Order) -> OrderOut:
+def _order_to_out(order: Order, db: Session | None = None) -> OrderOut:
+    table_num = None
+    if getattr(order, "table", None):
+        table_num = order.table.number
+    elif db and order.table_id:
+        t = db.get(Table, order.table_id)
+        if t:
+            table_num = t.number
+
     return OrderOut(
         id=order.id,
         session_id=order.session_id,
         table_id=order.table_id,
+        table_number=str(table_num) if table_num is not None else None,
         placed_at=_fmt_dt(order.placed_at),
         status=order.status,
+        source=getattr(order, "source", "bot") or "bot",
+        approval_status=getattr(order, "approval_status", "PENDING") or "PENDING",
+        notes=getattr(order, "notes", None),
         items=[
             OrderItemOut(
                 id=i.id,
                 item_name=i.item_name,
                 unit_price=float(i.unit_price),
                 quantity=i.quantity,
+                station=getattr(i, "station", None),
+                notes=getattr(i, "notes", None),
+                allergy_flag=bool(getattr(i, "allergy_flag", False)),
+                item_status=getattr(i, "item_status", "RECEIVED") or "RECEIVED",
             )
             for i in order.items
         ],
@@ -81,6 +97,7 @@ def create_order(
     if not table:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Table not found")
 
+    now = datetime.now(timezone.utc)
     session = None
     if payload.session_id:
         session_q = db.query(DiningSession).filter(DiningSession.id == payload.session_id)
@@ -92,12 +109,26 @@ def create_order(
     if not session:
         session = active_session_for_table(db, payload.table_id)
     if not session:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active session for table")
+        # Auto-initialize active dining session for the table so orders succeed immediately
+        session = DiningSession(
+            id=new_id(),
+            table_id=table.id,
+            tenant_id=table.tenant_id,
+            branch_id=table.branch_id,
+            guest_name=payload.notes or f"Guest Table {table.number}",
+            party_size=table.capacity or 2,
+            status="ACTIVE",
+            seated_at=now,
+        )
+        db.add(session)
+        table.status = "ACTIVE"
+        db.flush()
+        record_history(db, table.id, table.status, "ACTIVE", None, session.id)
 
     if not payload.items:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Order must include items")
-
-    now = datetime.now(timezone.utc)
+    is_guest = getattr(payload, "source", None) in ("bot", "guest", "qr") or payload.source is None
+    approval = payload.approval_status or ("PENDING" if is_guest else "APPROVED")
     order = Order(
         id=new_id(),
         session_id=session.id,
@@ -106,14 +137,17 @@ def create_order(
         branch_id=table.branch_id,
         placed_at=now,
         status="RECEIVED",
+        source=payload.source or ("guest" if is_guest else "waiter"),
+        approval_status=approval,
+        notes=payload.notes,
     )
     db.add(order)
     db.flush()
 
     for line in payload.items:
-        menu_item = db.get(MenuItem, line.menu_item_id)
+        menu_item = db.get(MenuItem, str(line.menu_item_id))
         if not menu_item:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Menu item not found")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Menu item not found: {line.menu_item_id}")
         db.add(
             OrderItem(
                 id=new_id(),
@@ -148,11 +182,80 @@ def create_order(
             "floorId": table.floor_id,
             "itemCount": item_count,
             "totalAmount": total_amount,
+            "approvalStatus": order.approval_status,
         },
         room=str(table.floor_id),
     )
+    if order.approval_status == "PENDING":
+        emit_sync(
+            "order.pending_approval",
+            {
+                "orderId": order.id,
+                "tableId": table.id,
+                "tableNumber": table.number,
+                "itemCount": item_count,
+                "totalAmount": total_amount,
+                "notes": order.notes,
+            },
+            room=str(table.floor_id),
+        )
     _emit_table_updated(table)
-    return _order_to_out(order)
+    return _order_to_out(order, db=db)
+
+
+def approve_order(db: Session, order_id: str, user_id: str | None = None) -> OrderOut:
+    order = db.get(Order, order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    order.approval_status = "APPROVED"
+    db.commit()
+    db.refresh(order)
+
+    table = db.get(Table, order.table_id)
+    floor_id = str(table.floor_id) if table else "floor-1"
+
+    emit_sync(
+        "order.approved",
+        {
+            "orderId": order.id,
+            "tableId": order.table_id,
+            "tableNumber": table.number if table else None,
+            "approvalStatus": "APPROVED",
+        },
+        room=floor_id,
+    )
+    emit_sync("order.status.changed", {"orderId": order.id, "newStatus": order.status}, room=floor_id)
+    emit_sync("kitchen_order_new", {"orderId": order.id, "tableNumber": table.number if table else None}, room=floor_id)
+    return _order_to_out(order, db=db)
+
+
+def reject_order(db: Session, order_id: str, reason: str | None = None, user_id: str | None = None) -> OrderOut:
+    order = db.get(Order, order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    order.approval_status = "REJECTED"
+    order.status = "REJECTED"
+    if reason:
+        order.notes = reason
+    db.commit()
+    db.refresh(order)
+
+    table = db.get(Table, order.table_id)
+    floor_id = str(table.floor_id) if table else "floor-1"
+
+    emit_sync(
+        "order.rejected",
+        {
+            "orderId": order.id,
+            "tableId": order.table_id,
+            "tableNumber": table.number if table else None,
+            "approvalStatus": "REJECTED",
+            "reason": order.notes,
+        },
+        room=floor_id,
+    )
+    emit_sync("order.status.changed", {"orderId": order.id, "newStatus": "REJECTED"}, room=floor_id)
+    return _order_to_out(order, db=db)
 
 
 def request_bill(

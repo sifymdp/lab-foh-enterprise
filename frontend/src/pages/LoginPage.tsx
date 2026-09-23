@@ -131,6 +131,33 @@ export function LoginPage() {
               ))}
             </div>
           </div>
+
+          <div
+            style={{
+              marginTop: '1.25rem',
+              paddingTop: '1rem',
+              borderTop: '1px solid var(--border, #e2e8f0)',
+              textAlign: 'center',
+            }}
+          >
+            <p
+              style={{
+                fontSize: '0.825rem',
+                color: 'var(--text-muted, #64748b)',
+                margin: '0 0 0.5rem 0',
+              }}
+            >
+              Looking to reserve a table as a guest?
+            </p>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              style={{ width: '100%', fontWeight: 600 }}
+              onClick={() => navigate('/customer/booking')}
+            >
+              🍽️ Open Customer Booking & Login →
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -115,6 +115,29 @@ PERM_CAMERA_CONFIGURATION = "camera.configuration"
 PERM_CAMERA_CALIBRATION   = "camera.calibration"
 PERM_CAMERA_OVERRIDE      = "camera.override"
 
+# order approval (waiter approves/rejects guest-placed orders)
+PERM_ORDERS_APPROVE = "orders.approve"
+PERM_ORDERS_REJECT  = "orders.reject"
+
+# settings
+PERM_SETTINGS_VIEW     = "settings.view"
+PERM_SETTINGS_EDIT     = "settings.edit"
+PERM_SETTINGS_PRINTERS = "settings.printers"
+
+# customer / guest portal management
+PERM_CUSTOMER_VIEW   = "customer.view"
+PERM_CUSTOMER_MANAGE = "customer.manage"
+
+# AI & operational insights
+PERM_INSIGHTS_VIEW = "insights.view"
+PERM_AI_FEATURES   = "ai.features"
+
+# voice / telephony
+PERM_VOICE_MANAGE = "voice.manage"
+
+# menu view (read-only access to menu)
+PERM_MENU_VIEW = "menu.view"
+
 ALL_PERMISSIONS = {
     PERM_USER_VIEW, PERM_USER_CREATE, PERM_USER_UPDATE, PERM_USER_DEACTIVATE, PERM_USER_DELETE,
     PERM_ROLES_VIEW, PERM_ROLES_CREATE, PERM_ROLES_UPDATE,
@@ -123,6 +146,7 @@ ALL_PERMISSIONS = {
     PERM_BOOKING_VIEW, PERM_BOOKING_CREATE, PERM_BOOKING_UPDATE, PERM_BOOKING_CANCEL,
     PERM_RESERVATIONS_MANAGE,
     PERM_ORDERS_VIEW, PERM_ORDERS_CREATE, PERM_ORDERS_UPDATE, PERM_ORDERS_CONFIRM, PERM_ORDERS_SERVE,
+    PERM_ORDERS_APPROVE, PERM_ORDERS_REJECT,
     PERM_KITCHEN_VIEW, PERM_KITCHEN_UPDATE, PERM_KITCHEN_MANAGE,
     PERM_KDS_VIEW, PERM_KDS_BUMP, PERM_KDS_RECALL, PERM_KDS_PRIORITY,
     PERM_BILLING_VIEW, PERM_BILLING_CREATE, PERM_BILLING_UPDATE, PERM_BILLING_CANCEL,
@@ -132,8 +156,12 @@ ALL_PERMISSIONS = {
     PERM_REPORTS_VIEW, PERM_REPORTS_EXPORT,
     PERM_AUDIT_VIEW,
     PERM_SHIFT_START, PERM_SHIFT_END, PERM_SHIFT_VIEW,
-    PERM_MENU_MANAGE,
+    PERM_MENU_MANAGE, PERM_MENU_VIEW,
     PERM_CAMERA_VIEW, PERM_CAMERA_ANALYTICS, PERM_CAMERA_CONFIGURATION, PERM_CAMERA_CALIBRATION, PERM_CAMERA_OVERRIDE,
+    PERM_SETTINGS_VIEW, PERM_SETTINGS_EDIT, PERM_SETTINGS_PRINTERS,
+    PERM_CUSTOMER_VIEW, PERM_CUSTOMER_MANAGE,
+    PERM_INSIGHTS_VIEW, PERM_AI_FEATURES,
+    PERM_VOICE_MANAGE,
 }
 
 
@@ -153,6 +181,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         PERM_RESERVATIONS_MANAGE,
         # Orders
         PERM_ORDERS_VIEW, PERM_ORDERS_CONFIRM, PERM_ORDERS_SERVE,
+        PERM_ORDERS_APPROVE, PERM_ORDERS_REJECT,
         # Kitchen
         PERM_KITCHEN_VIEW, PERM_KITCHEN_MANAGE,
         PERM_KDS_VIEW, PERM_KDS_BUMP, PERM_KDS_RECALL, PERM_KDS_PRIORITY,
@@ -169,18 +198,32 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         # Shift
         PERM_SHIFT_START, PERM_SHIFT_END, PERM_SHIFT_VIEW,
         # Menu
-        PERM_MENU_MANAGE,
+        PERM_MENU_MANAGE, PERM_MENU_VIEW,
         # Camera & Vision
         PERM_CAMERA_VIEW, PERM_CAMERA_ANALYTICS, PERM_CAMERA_CONFIGURATION, PERM_CAMERA_CALIBRATION, PERM_CAMERA_OVERRIDE,
+        # Settings
+        PERM_SETTINGS_VIEW, PERM_SETTINGS_EDIT, PERM_SETTINGS_PRINTERS,
+        # Customer / Guest
+        PERM_CUSTOMER_VIEW, PERM_CUSTOMER_MANAGE,
+        # AI & Insights
+        PERM_INSIGHTS_VIEW, PERM_AI_FEATURES,
+        # Voice
+        PERM_VOICE_MANAGE,
     },
     "HOST": {
-        # Host: front-of-house seating operations ONLY
+        # Host: front-of-house seating operations
         PERM_TABLE_VIEW, PERM_TABLE_ASSIGN,
-        PERM_BOOKING_VIEW,
+        PERM_BOOKING_VIEW, PERM_BOOKING_CREATE,
         PERM_RESERVATIONS_MANAGE,
-        PERM_ORDERS_VIEW,
+        PERM_ORDERS_VIEW, PERM_ORDERS_APPROVE, PERM_ORDERS_REJECT,
         # Camera view & overrides for table seating verification
         PERM_CAMERA_VIEW, PERM_CAMERA_OVERRIDE,
+        # Customer portal management
+        PERM_CUSTOMER_VIEW,
+        # Insights (view only)
+        PERM_INSIGHTS_VIEW,
+        # Menu (view only)
+        PERM_MENU_VIEW,
     },
     # SUPERVISOR is kept as a backward-compat alias for HOST
     "SUPERVISOR": {
@@ -189,6 +232,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         PERM_DISCOUNT_APPLY, PERM_DISCOUNT_APPROVE,
         PERM_PAYMENT_VIEW, PERM_PAYMENT_CREATE,
         PERM_RESERVATIONS_MANAGE,
+        PERM_CUSTOMER_VIEW,
     },
     "CASHIER": {
         # Billing
@@ -203,12 +247,21 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         PERM_REPORTS_VIEW,
         # Shift management
         PERM_SHIFT_START, PERM_SHIFT_END, PERM_SHIFT_VIEW,
+        # Settings (view)
+        PERM_SETTINGS_VIEW,
+        # Menu (view only)
+        PERM_MENU_VIEW,
     },
     "WAITER": {
         PERM_TABLE_VIEW,
         PERM_ORDERS_VIEW, PERM_ORDERS_CREATE, PERM_ORDERS_UPDATE, PERM_ORDERS_SERVE,
+        PERM_ORDERS_APPROVE, PERM_ORDERS_REJECT,
         PERM_BILLING_VIEW,
         PERM_DISCOUNT_APPLY,
+        # Menu (view only — to help guests)
+        PERM_MENU_VIEW,
+        # Customer (view guest info)
+        PERM_CUSTOMER_VIEW,
     },
     "CHEF": {
         # Kitchen — full visibility and management
@@ -217,6 +270,10 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         PERM_KDS_VIEW, PERM_KDS_BUMP, PERM_KDS_RECALL, PERM_KDS_PRIORITY,
         PERM_ORDERS_VIEW, PERM_ORDERS_CONFIRM,
         PERM_TABLE_VIEW,
+        # Menu (view for reference)
+        PERM_MENU_VIEW,
+        # AI features (cooking time prediction, demand forecast)
+        PERM_AI_FEATURES,
     },
 }
 

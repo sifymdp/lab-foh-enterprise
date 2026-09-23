@@ -4,16 +4,14 @@ from app.schemas.common import CamelModel
 class OrderItemIn(CamelModel):
     menu_item_id: str
     quantity: int = 1
-    station: str | None = None
-    notes: str | None = None
-    allergy_flag: bool = False
 
 
 class OrderCreate(CamelModel):
-    table_id: str
+    table_id: str | None = None
     session_id: str | None = None
     items: list[OrderItemIn]
     source: str | None = "bot"
+    approval_status: str | None = "PENDING"
     notes: str | None = None
 
 

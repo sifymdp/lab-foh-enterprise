@@ -139,11 +139,22 @@ def patch_table_status(
             detail=f"Invalid transition from {table.status} to {new_status}",
         )
     session = active_session_for_table(db, table_id)
-    if new_status == "SEATED" and session:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Table already has an active session",
+    if new_status in ("SEATED", "ACTIVE") and not session:
+        now = datetime.now(timezone.utc)
+        session = DiningSession(
+            id=new_id(),
+            table_id=table.id,
+            tenant_id=table.tenant_id,
+            branch_id=table.branch_id,
+            created_by=user_id,
+            guest_name=f"Guest Table {table.number}",
+            party_size=table.capacity or 2,
+            status=new_status,
+            seated_at=now,
         )
+        db.add(session)
+        db.flush()
+
     old = table.status
     table.status = new_status
     _on_status_change(table, old, new_status)
@@ -153,47 +164,10 @@ def patch_table_status(
             # Automatically link/create a real Bill record in the billing module
             from app.models.bill import Bill
             from app.models.order import Order
-            from app.models.order_item import OrderItem
-            from app.models.menu_item import MenuItem
             from app.services.billing_service import calculate_bill
             from decimal import Decimal
             
             now = datetime.now(timezone.utc)
-            orders = db.query(Order).filter(Order.session_id == session.id).all()
-            
-            total_items = sum(len(order.items) for order in orders)
-            if total_items == 0:
-                menu_items = db.query(MenuItem).filter(MenuItem.available == True).limit(4).all()
-                if menu_items:
-                    target_order = orders[0] if orders else None
-                    if not target_order:
-                        target_order = Order(
-                            id=new_id(),
-                            tenant_id=table.tenant_id,
-                            branch_id=table.branch_id,
-                            session_id=session.id,
-                            table_id=table.id,
-                            created_by=user_id,
-                            placed_at=now,
-                            status="SERVED",
-                        )
-                        db.add(target_order)
-                        db.flush()
-                        orders = [target_order]
-                    for mi in menu_items:
-                        qty = 1 if int(session.party_size or 2) <= 2 else 2
-                        oi = OrderItem(
-                            id=new_id(),
-                            order_id=target_order.id,
-                            menu_item_id=mi.id,
-                            item_name=mi.name,
-                            unit_price=mi.price,
-                            quantity=qty,
-                        )
-                        db.add(oi)
-                    db.flush()
-                    db.refresh(target_order)
-
             orders = db.query(Order).filter(Order.session_id == session.id).all()
             subtotal = Decimal("0")
             for order in orders:

@@ -3,13 +3,17 @@ import { SECTION_ICONS } from '../../services/tableConfig'
 import { getCanvasPoint, hitTestCanvas, type CanvasSelection } from '../../lib/canvasHitTest'
 import type { DiningSession, Floor, FloorLabel, RectBounds, Section, Table } from '../../types'
 import { BoundsBox } from './BoundsBox'
-import { TableMarker } from './TableMarker'
+import { TableMarker, type TableReservationInfo } from './TableMarker'
 
 export type { CanvasSelection }
 
 interface FloorPlanCanvasProps {
   floor: Floor
   sessions: DiningSession[]
+  waiterCalls?: Record<string, 'CALLING' | 'ON_IT' | boolean>
+  reservations?: Record<string, TableReservationInfo>
+  pendingOrders?: Record<string, number>
+  statusFilter?: import('../../types').TableStatus | null
   editable: boolean
   selection: CanvasSelection
   onSelect: (sel: CanvasSelection) => void
@@ -21,6 +25,10 @@ interface FloorPlanCanvasProps {
 export function FloorPlanCanvas({
   floor,
   sessions,
+  waiterCalls = {},
+  reservations = {},
+  pendingOrders = {},
+  statusFilter,
   editable,
   selection,
   onSelect,
@@ -73,11 +81,21 @@ export function FloorPlanCanvas({
       (s) =>
         s.tableId === table.id && ['SEATED', 'ACTIVE', 'BILLING', 'PAID'].includes(s.status),
     )
+    const waiterCallState = waiterCalls[table.id]
+    const isHighlighted = statusFilter ? table.status === statusFilter : false
+    const isDimmed = statusFilter ? table.status !== statusFilter : false
+
     return (
       <TableMarker
         key={table.id}
         table={table}
         session={session}
+        hasWaiterCall={Boolean(waiterCallState)}
+        waiterCallState={waiterCallState}
+        isHighlighted={isHighlighted}
+        isDimmed={isDimmed}
+        reservation={reservations[table.id]}
+        pendingOrdersCount={pendingOrders[table.id] || 0}
         selected={selection?.type === 'table' && selection.id === table.id}
         editable={editable}
         onSelect={(id) => onSelect({ type: 'table', id })}

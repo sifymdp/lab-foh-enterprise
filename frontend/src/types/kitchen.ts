@@ -44,7 +44,6 @@ export type KitchenStation =
   | 'BAKERY_CONFECTIONERY'
   | 'SWEETS_MITHAI'
   | 'BEVERAGE_BAR'
-  | 'EXPO'
 
 export interface CookingTimePrediction {
   estimated_minutes: number

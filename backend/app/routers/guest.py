@@ -1,6 +1,7 @@
 import html
 import json
 from collections import defaultdict
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse
@@ -9,21 +10,30 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import get_db
 from app.models import Bill, DiningSession, Table, TableQRCode
+from app.schemas.common import CamelModel
 from app.services import menu_service
 from app.services.floor_service import get_current_floor
 from app.services.table_service import active_session_for_table
 from app.services import ai_service
 from app.schemas.ai import AIEventCreate
 from urllib.parse import quote
-from datetime import datetime, timezone
-from app.schemas.common import CamelModel
 
 from app.services.order_service import get_bill, list_orders, mark_paid, request_bill
 
 router = APIRouter(prefix="/guest", tags=["guest"])
 
 RESTAURANT_NAME = "FOH Restaurant"
-CATEGORY_ORDER = ["Starters", "Mains", "Drinks", "Desserts"]
+CATEGORY_ORDER = [
+    "North Indian",
+    "South Indian",
+    "Chinese & Pan-Asian",
+    "Italian & Continental",
+    "Desserts",
+    "Liquor & Cocktails",
+    "Starters",
+    "Mains",
+    "Drinks",
+]
 
 
 def _resolve_qr(db: Session, token: str) -> TableQRCode:
@@ -83,10 +93,10 @@ def _build_guest_menu_html(
                   <div class="menu-item__info">
                     <h3>{html.escape(item.name)}</h3>
                     {f'<p class="desc">{desc}</p>' if desc else ''}
-                    <p class="price">Γé╣{float(item.price):.2f}</p>
+                    <p class="price">₹{float(item.price):.2f}</p>
                   </div>
                   <div class="stepper">
-                    <button type="button" class="stepper__btn" onclick="changeQty('{html.escape(item.id)}', -1)" aria-label="Remove one">ΓêÆ</button>
+                    <button type="button" class="stepper__btn" onclick="changeQty('{html.escape(item.id)}', -1)" aria-label="Remove one">−</button>
                     <span class="stepper__qty" id="qty-{html.escape(item.id)}">0</span>
                     <button type="button" class="stepper__btn stepper__btn--add" onclick="changeQty('{html.escape(item.id)}', 1)" aria-label="Add one">+</button>
                   </div>
@@ -99,7 +109,7 @@ def _build_guest_menu_html(
         )
 
     welcome_line = (
-        f"Welcome {html.escape(guest_name)} ┬╖ Table {html.escape(table.number)}"
+        f"Welcome {html.escape(guest_name)} · Table {html.escape(table.number)}"
         if guest_name
         else f"Table {html.escape(table.number)}"
     )
@@ -109,7 +119,7 @@ def _build_guest_menu_html(
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>{html.escape(restaurant_name)} ΓÇö Table {html.escape(table.number)}</title>
+  <title>{html.escape(restaurant_name)} — Table {html.escape(table.number)}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -318,9 +328,9 @@ def _build_guest_menu_html(
       <h1>{html.escape(restaurant_name)}</h1>
       <p>{welcome_line}</p>
     </div>
-    <button type="button" class="track-btn" onclick="callWaiter()">≡ƒÖï Call waiter</button>
+    <button type="button" class="track-btn" onclick="callWaiter()">🔔 Call waiter</button>
     <button type="button" class="track-btn" id="bill-btn" style="display:none;" onclick="toggleOverlay('bill-overlay', true)">
-      ≡ƒº╛ Bill
+      🧾 Bill
       <span class="track-btn__dot"></span>
     </button>
     <button type="button" class="track-btn" id="track-btn" onclick="toggleOverlay('track-overlay', true)">
@@ -340,7 +350,7 @@ def _build_guest_menu_html(
 
   <div class="overlay overlay--center overlay--top" id="action-card-overlay">
     <div class="action-card">
-      <div class="action-card__icon" id="action-card-icon">≡ƒÖï</div>
+      <div class="action-card__icon" id="action-card-icon">🔔</div>
       <h2 id="action-card-title"></h2>
       <p id="action-card-message"></p>
       <button type="button" class="btn-confirm" onclick="dismissActionCard()">Got it</button>
@@ -352,7 +362,7 @@ def _build_guest_menu_html(
       <h2>Scan to pay</h2>
       <div class="amount" id="upi-amount"></div>
       <div id="upi-qr-holder"></div>
-      <p class="demo-note" style="margin-bottom:16px;">Scan with any UPI app ΓÇö GPay, PhonePe, Paytm, etc.</p>
+      <p class="demo-note" style="margin-bottom:16px;">Scan with any UPI app — GPay, PhonePe, Paytm, etc.</p>
       <button type="button" class="btn-confirm" onclick="confirmUpiPaid()">I've completed the payment</button>
       <button type="button" class="btn btn-ghost" style="margin-top:8px;" onclick="toggleOverlay('upi-overlay', false)">Cancel</button>
     </div>
@@ -369,7 +379,7 @@ def _build_guest_menu_html(
       </div>
       <button type="button" class="btn-confirm" onclick="confirmCardPaid()">Pay now</button>
       <button type="button" class="btn btn-ghost" style="margin-top:8px;" onclick="toggleOverlay('card-overlay', false)">Cancel</button>
-      <p class="demo-note">Demo mode ΓÇö no real card is charged.</p>
+      <p class="demo-note">Demo mode — no real card is charged.</p>
     </div>
   </div>
 
@@ -377,7 +387,7 @@ def _build_guest_menu_html(
     <div class="sheet">
       <div class="sheet__header">
         <h2>Your bill</h2>
-        <button type="button" class="sheet__close" onclick="toggleOverlay('bill-overlay', false)">Γ£ò</button>
+        <button type="button" class="sheet__close" onclick="toggleOverlay('bill-overlay', false)">✕</button>
       </div>
       <div id="bill-detail"></div>
     </div>
@@ -385,17 +395,17 @@ def _build_guest_menu_html(
 
   <button type="button" class="cart-bar" id="cart-bar" onclick="toggleOverlay('cart-overlay', true)">
     <span class="cart-bar__left" id="cart-bar-count">0 items</span>
-    <span class="cart-bar__right" id="cart-bar-total">Γé╣0.00 ┬╖ Review order</span>
+    <span class="cart-bar__right" id="cart-bar-total">₹0.00 · Review order</span>
   </button>
 
   <div class="overlay" id="cart-overlay" onclick="if(event.target===this) toggleOverlay('cart-overlay', false)">
     <div class="sheet">
       <div class="sheet__header">
         <h2>Review your order</h2>
-        <button type="button" class="sheet__close" onclick="toggleOverlay('cart-overlay', false)">Γ£ò</button>
+        <button type="button" class="sheet__close" onclick="toggleOverlay('cart-overlay', false)">✕</button>
       </div>
       <div id="review-lines"></div>
-      <div class="review-total"><span>Total</span><span id="review-total">Γé╣0.00</span></div>
+      <div class="review-total"><span>Total</span><span id="review-total">₹0.00</span></div>
       <button type="button" id="confirm-order" class="btn-confirm" onclick="placeOrder()">Place Order</button>
     </div>
   </div>
@@ -404,7 +414,7 @@ def _build_guest_menu_html(
     <div class="sheet">
       <div class="sheet__header">
         <h2>Your order status</h2>
-        <button type="button" class="sheet__close" onclick="toggleOverlay('track-overlay', false)">Γ£ò</button>
+        <button type="button" class="sheet__close" onclick="toggleOverlay('track-overlay', false)">✕</button>
       </div>
       <div id="order-status-panel"><p class="empty-note">No orders placed yet.</p></div>
       <button type="button" id="request-bill-btn" class="btn-confirm" style="display:none;" onclick="toggleOverlay('confirm-bill-overlay', true)">
@@ -441,7 +451,7 @@ def _build_guest_menu_html(
     }}
     const STEPS = ['PENDING', 'APPROVED', 'PREPARING', 'READY'];
     const STEP_LABELS = {{ PENDING: 'Waiting for approval', APPROVED: 'Approved', PREPARING: 'Preparing', READY: 'Ready to serve' }};
-    const CATEGORY_ICONS = {{ Starters: '≡ƒÑú', Mains: '≡ƒì╜∩╕Å', Drinks: '≡ƒì╖', Desserts: '≡ƒºü' }};
+    const CATEGORY_ICONS = {{ Starters: '🥗', Mains: '🍛', Drinks: '🍹', Desserts: '🍰' }};
     let hasExistingBill = false;
     let waiterCallAcknowledged = false;
 
@@ -485,7 +495,7 @@ def _build_guest_menu_html(
       const total = entries.reduce((sum, i) => sum + i.price * i.qty, 0);
       bar.classList.toggle('is-visible', count > 0);
       document.getElementById('cart-bar-count').textContent = count + (count === 1 ? ' item' : ' items');
-      document.getElementById('cart-bar-total').textContent = 'Γé╣' + total.toFixed(2) + ' ┬╖ Review order';
+      document.getElementById('cart-bar-total').textContent = '₹' + total.toFixed(2) + ' · Review order';
       renderReviewSheet();
     }}
 
@@ -496,7 +506,7 @@ def _build_guest_menu_html(
       const btn = document.getElementById('confirm-order');
       if (!entries.length) {{
         linesEl.innerHTML = '<p class="empty-note">Your cart is empty.</p>';
-        totalEl.textContent = 'Γé╣0.00';
+        totalEl.textContent = '₹0.00';
         btn.disabled = true;
         return;
       }}
@@ -504,12 +514,12 @@ def _build_guest_menu_html(
       linesEl.innerHTML = entries.map(i => {{
         total += i.price * i.qty;
         return '<div class="review-line">'
-          + '<div><div class="review-line__name">' + i.qty + '├ù ' + i.name + '</div>'
-          + '<div class="review-line__price">Γé╣' + i.price.toFixed(2) + ' each</div></div>'
-          + '<div class="review-line__price">Γé╣' + (i.price * i.qty).toFixed(2) + '</div>'
+          + '<div><div class="review-line__name">' + i.qty + '× ' + i.name + '</div>'
+          + '<div class="review-line__price">₹' + i.price.toFixed(2) + ' each</div></div>'
+          + '<div class="review-line__price">₹' + (i.price * i.qty).toFixed(2) + '</div>'
           + '</div>';
       }}).join('');
-      totalEl.textContent = 'Γé╣' + total.toFixed(2);
+      totalEl.textContent = '₹' + total.toFixed(2);
       btn.disabled = false;
     }}
 
@@ -535,19 +545,20 @@ def _build_guest_menu_html(
       const approvedOrders = orders.filter(o => o.approvalStatus === 'APPROVED');
       requestBtn.style.display = (approvedOrders.length > 0 && !hasExistingBill) ? 'block' : 'none';
       panel.innerHTML = orders.map(order => {{
-        const itemsText = order.items.map(i => i.quantity + '├ù ' + i.itemName).join(', ');
+        const itemsText = order.items.map(i => i.quantity + '× ' + i.itemName).join(', ');
         if (order.approvalStatus === 'REJECTED') {{
+          const reason = order.notes ? ': ' + order.notes : '';
           return '<div class="status-tracker rejected">'
             + '<div class="status-tracker__items">' + itemsText + '</div>'
-            + '<div class="status-step is-current" style="align-items:flex-start"><span class="status-step__dot">Γ£ò</span>'
-            + '<span class="status-step__label">Order was declined</span></div></div>';
+            + '<div class="status-step is-current" style="align-items:flex-start"><span class="status-step__dot">✕</span>'
+            + '<span class="status-step__label" style="color:var(--red);font-weight:700;">Order declined by staff' + reason + '</span></div></div>';
         }}
         const idx = statusIndex(order);
         const steps = STEPS.map((s, i) => {{
           const cls = i < idx ? 'is-done' : i === idx ? 'is-current' : '';
           return '<div class="status-step ' + cls + '">'
             + '<span class="status-step__line"></span>'
-            + '<span class="status-step__dot">' + (i < idx ? 'Γ£ô' : '') + '</span>'
+            + '<span class="status-step__dot">' + (i < idx ? '✓' : '') + '</span>'
             + '<span class="status-step__label">' + STEP_LABELS[s] + '</span>'
             + '</div>';
         }}).join('');
@@ -557,12 +568,20 @@ def _build_guest_menu_html(
       }}).join('');
     }}
 
+    const knownRejectedOrders = new Set();
     async function pollOrderStatus() {{
       try {{
         const res = await fetch(API_BASE + '/guest/orders?token=' + encodeURIComponent(CONFIG.token));
         if (!res.ok) return;
         const orders = await res.json();
         orders.sort((a, b) => new Date(b.placedAt) - new Date(a.placedAt));
+        orders.forEach(o => {{
+          if (o.approvalStatus === 'REJECTED' && !knownRejectedOrders.has(o.id)) {{
+            knownRejectedOrders.add(o.id);
+            showToast('⚠️ Your order was rejected by staff', true);
+            showActionCard('✕', 'Order Declined', 'Your order was declined by restaurant staff' + (o.notes ? ': ' + o.notes : '. Please call a waiter for help.'));
+          }}
+        }});
         renderOrderStatuses(orders);
       }} catch (e) {{ /* try again next poll */ }}
     }}
@@ -572,7 +591,7 @@ def _build_guest_menu_html(
       if (!entries.length) return;
       const btn = document.getElementById('confirm-order');
       btn.disabled = true;
-      btn.textContent = 'SendingΓÇª';
+      btn.textContent = 'Sending…';
       try {{
         const res = await fetch(API_BASE + '/orders?token=' + encodeURIComponent(CONFIG.token), {{
           method: 'POST',
@@ -590,7 +609,7 @@ def _build_guest_menu_html(
         renderCartBar();
         saveCart();
         toggleOverlay('cart-overlay', false);
-        showToast('Order placed ΓÇö thank you!');
+        showToast('Order placed — thank you!');
         pollOrderStatus();
       }} catch (e) {{
         showToast(e.message || 'Could not place order', true);
@@ -633,17 +652,18 @@ def _build_guest_menu_html(
 
     function setOrderingLocked(locked) {{
       document.body.classList.toggle('ordering-locked', locked);
-      document.getElementById('cart-bar').style.display = locked ? 'none' : '';
+      const bar = document.getElementById('cart-bar');
+      if (bar) bar.style.display = locked ? 'none' : '';
       if (locked) {{
         Object.keys(cart).forEach(k => {{ cart[k].qty = 0; const el = document.getElementById('qty-' + k); if (el) el.textContent = '0'; }});
         renderCartBar();
         saveCart();
       }}
       if (locked && !wasOrderingLocked) {{
-        const key = 'foh_seen_locked_' + CONFIG.sessionId;
+        const key = 'foh_seen_locked_' + (CONFIG.sessionId || CONFIG.token);
         if (!hasSeen(key)) {{
           markSeen(key);
-          showActionCard('≡ƒöÆ', 'Orders are closed', 'Your bill has been requested. Need something else? Tap Call waiter.');
+          showActionCard('✓', 'Bill paid', 'Thank you! We hope to see you again soon.');
         }}
       }}
       wasOrderingLocked = locked;
@@ -651,10 +671,10 @@ def _build_guest_menu_html(
 
     function renderBill(bill) {{
       hasExistingBill = !!bill;
-      setOrderingLocked(!!bill);
+      const isPaid = bill ? bill.status === 'PAID' : false;
+      setOrderingLocked(isPaid);
       const billBtn = document.getElementById('bill-btn');
       if (!bill) {{ billBtn.style.display = 'none'; return; }}
-      const isPaid = bill.status === 'PAID';
       billBtn.style.display = 'inline-flex';
       billBtn.classList.toggle('has-active', !isPaid);
 
@@ -662,9 +682,9 @@ def _build_guest_menu_html(
       if (!hasSeen(seenKey)) {{
         markSeen(seenKey);
         if (isPaid) {{
-          showActionCard('Γ£à', 'Bill paid', 'Thank you! We hope to see you again soon.');
+          showActionCard('✓', 'Bill paid', 'Thank you! We hope to see you again soon.');
         }} else {{
-          showActionCard('≡ƒº╛', 'Your bill is ready', 'Γé╣' + bill.total.toFixed(2) + ' ΓÇö tap the Bill button anytime to view or pay.');
+          showActionCard('🧾', 'Your bill is ready', '₹' + bill.total.toFixed(2) + ' — tap the Bill button anytime to view or pay.');
         }}
       }}
 
@@ -673,54 +693,54 @@ def _build_guest_menu_html(
         if (!groups[i.category]) groups[i.category] = [];
         groups[i.category].push(i);
       }});
-      const catOrder = ['Starters', 'Mains', 'Drinks', 'Desserts'];
+      const catOrder = ['North Indian', 'South Indian', 'Chinese & Pan-Asian', 'Italian & Continental', 'Desserts', 'Liquor & Cocktails', 'Starters', 'Mains', 'Drinks'];
       const cats = catOrder.filter(c => groups[c]).concat(Object.keys(groups).filter(c => !catOrder.includes(c)));
       const rows = cats.map(cat => {{
         const items = groups[cat].map(i =>
-          '<div class="review-line"><span>' + i.quantity + '├ù ' + i.itemName + '</span><span>Γé╣' + i.lineTotal.toFixed(2) + '</span></div>'
+          '<div class="review-line"><span>' + i.quantity + '× ' + i.itemName + '</span><span>₹' + i.lineTotal.toFixed(2) + '</span></div>'
         ).join('');
         return '<div style="font-weight:700;font-size:0.85rem;color:#475569;margin:10px 0 4px;">'
-          + (CATEGORY_ICONS[cat] || 'ΓÇó') + ' ' + cat.toUpperCase() + '</div>' + items;
+          + (CATEGORY_ICONS[cat] || '•') + ' ' + cat.toUpperCase() + '</div>' + items;
       }}).join('');
 
       const statusLine = isPaid
-        ? 'Γ£à PAID' + (bill.paymentMethod ? ' ┬╖ via ' + bill.paymentMethod : '')
-        : 'ΓÅ│ AWAITING PAYMENT';
+        ? '✓ PAID' + (bill.paymentMethod ? ' · via ' + bill.paymentMethod : '')
+        : '⏳ AWAITING PAYMENT';
 
       const payBlock = isPaid ? '' : `
         <div style="border-top:1px dashed var(--line);margin-top:14px;padding-top:14px;">
           <h3 style="margin:0 0 12px;font-size:0.95rem;">Choose a payment method</h3>
           <div class="pay-method-grid">
             <button type="button" class="pay-method-btn" onclick="showUpiPayment(${{bill.total}})">
-              <span class="pay-method-btn__icon">≡ƒô▒</span>
+              <span class="pay-method-btn__icon">📱</span>
               <span class="pay-method-btn__text">
                 <div class="pay-method-btn__title">UPI</div>
                 <div class="pay-method-btn__sub">GPay, PhonePe, Paytm & more</div>
               </span>
-              <span class="pay-method-btn__chevron">ΓÇ║</span>
+              <span class="pay-method-btn__chevron">›</span>
             </button>
             <button type="button" class="pay-method-btn" onclick="showCardPayment(${{bill.total}})">
-              <span class="pay-method-btn__icon">≡ƒÆ│</span>
+              <span class="pay-method-btn__icon">💳</span>
               <span class="pay-method-btn__text">
                 <div class="pay-method-btn__title">Card</div>
                 <div class="pay-method-btn__sub">Debit or credit card</div>
               </span>
-              <span class="pay-method-btn__chevron">ΓÇ║</span>
+              <span class="pay-method-btn__chevron">›</span>
             </button>
             <button type="button" class="pay-method-btn" onclick="requestCashPayment()">
-              <span class="pay-method-btn__icon">≡ƒÆ╡</span>
+              <span class="pay-method-btn__icon">💵</span>
               <span class="pay-method-btn__text">
                 <div class="pay-method-btn__title">Cash</div>
                 <div class="pay-method-btn__sub">Pay your waiter directly</div>
               </span>
-              <span class="pay-method-btn__chevron">ΓÇ║</span>
+              <span class="pay-method-btn__chevron">›</span>
             </button>
           </div>
         </div>
       `;
 
       document.getElementById('bill-detail').innerHTML = rows
-        + '<div class="review-total"><span>Total</span><span>Γé╣' + bill.total.toFixed(2) + '</span></div>'
+        + '<div class="review-total"><span>Total</span><span>₹' + bill.total.toFixed(2) + '</span></div>'
         + '<div style="text-align:center;margin-top:12px;font-weight:700;color:' + (isPaid ? '#0f766e' : '#b45309') + ';">'
         + statusLine + '</div>'
         + payBlock;
@@ -729,9 +749,9 @@ def _build_guest_menu_html(
     async function showUpiPayment(amount) {{
       toggleOverlay('card-overlay', false);
       toggleOverlay('upi-overlay', true);
-      document.getElementById('upi-amount').textContent = 'Γé╣' + amount.toFixed(2);
+      document.getElementById('upi-amount').textContent = '₹' + amount.toFixed(2);
       const holder = document.getElementById('upi-qr-holder');
-      holder.innerHTML = '<p class="demo-note">Loading QRΓÇª</p>';
+      holder.innerHTML = '<p class="demo-note">Loading QR…</p>';
       try {{
         const res = await fetch(API_BASE + '/guest/upi-qr?token=' + encodeURIComponent(CONFIG.token));
         const data = await res.json();
@@ -749,14 +769,14 @@ def _build_guest_menu_html(
         toggleOverlay('upi-overlay', false);
         pollBillStatus();
       }} catch (e) {{
-        showActionCard('ΓÜá∩╕Å', 'Payment not confirmed', 'Please try again or ask your waiter for help.');
+        showActionCard('⚠️', 'Payment not confirmed', 'Please try again or ask your waiter for help.');
       }}
     }}
 
     function showCardPayment(amount) {{
       toggleOverlay('upi-overlay', false);
       toggleOverlay('card-overlay', true);
-      document.getElementById('card-amount').textContent = 'Γé╣' + amount.toFixed(2);
+      document.getElementById('card-amount').textContent = '₹' + amount.toFixed(2);
     }}
 
     async function confirmCardPaid() {{
@@ -766,7 +786,7 @@ def _build_guest_menu_html(
         toggleOverlay('card-overlay', false);
         pollBillStatus();
       }} catch (e) {{
-        showActionCard('ΓÜá∩╕Å', 'Payment failed', 'Please try again.');
+        showActionCard('⚠️', 'Payment failed', 'Please try again.');
       }}
     }}
 
@@ -776,7 +796,7 @@ def _build_guest_menu_html(
         const status = statusRes.ok ? await statusRes.json() : null;
         if (status) {{
           showActionCard(
-            '≡ƒÆ╡',
+            '💵',
             'Already on the way',
             status.acknowledged
               ? 'Your waiter is coming to collect the cash payment now.'
@@ -785,9 +805,9 @@ def _build_guest_menu_html(
           return;
         }}
         await fetch(API_BASE + '/guest/request-cash-payment?token=' + encodeURIComponent(CONFIG.token), {{ method: 'POST' }});
-        showActionCard('≡ƒÆ╡', 'Waiter notified', 'They\\u2019ll come collect the cash payment shortly. Please have the amount ready.');
+        showActionCard('💵', 'Waiter notified', 'They\\u2019ll come collect the cash payment shortly. Please have the amount ready.');
       }} catch (e) {{
-        showActionCard('ΓÜá∩╕Å', 'Could not notify waiter', 'Please try again.');
+        showActionCard('⚠️', 'Could not notify waiter', 'Please try again.');
       }}
     }}
 
@@ -809,18 +829,18 @@ def _build_guest_menu_html(
         const status = statusRes.ok ? await statusRes.json() : null;
         if (status) {{
           showActionCard(
-            '≡ƒÖÅ',
+            '🙏',
             'We\\u2019ve got your request',
             status.acknowledged
-              ? 'Your waiter is already on the way ΓÇö thank you for your patience.'
+              ? 'Your waiter is already on the way — thank you for your patience.'
               : 'Your waiter has already been notified and will be with you shortly.'
           );
           return;
         }}
         await fetch(API_BASE + '/guest/call-waiter?token=' + encodeURIComponent(CONFIG.token), {{ method: 'POST' }});
-        showActionCard('≡ƒÖï', 'Waiter notified', 'They will be with you shortly!');
+        showActionCard('🔔', 'Waiter notified', 'They will be with you shortly!');
       }} catch (e) {{
-        showActionCard('ΓÜá∩╕Å', 'Could not reach the waiter', 'Please try calling again.');
+        showActionCard('⚠️', 'Could not reach the waiter', 'Please try calling again.');
       }}
     }}
 
@@ -831,7 +851,7 @@ def _build_guest_menu_html(
         const status = await res.json();
         if (!status) {{ waiterCallAcknowledged = false; return; }}
         if (status.acknowledged && !waiterCallAcknowledged) {{
-          showToast('≡ƒÜ╢ Waiter is on the way!');
+          showToast('🏃 Waiter is on the way!');
         }}
         waiterCallAcknowledged = status.acknowledged;
       }} catch (e) {{ /* try again next poll */ }}
@@ -940,7 +960,6 @@ def get_guest_bill(
 
     session = active_session_for_table(db, table.id)
     if not session:
-        # Check if table was recently in BILLING or has a completed session
         session = (
             db.query(DiningSession)
             .filter(DiningSession.table_id == table.id)
@@ -951,7 +970,7 @@ def get_guest_bill(
         return {
             "hasActiveSession": False,
             "tableId": table.id,
-            "tableNumber": table.number,
+            "tableNumber": str(table.number),
             "tableStatus": table.status,
             "items": [],
             "subtotal": 0.0,
@@ -964,8 +983,8 @@ def get_guest_bill(
     items_map: dict[str, dict] = {}
     for order in session.orders or []:
         for item in order.items or []:
-            key = f"{item.item_name}-{float(item.unit_price):.2f}"
             unit_price = float(item.unit_price)
+            key = f"{item.item_name}-{unit_price:.2f}"
             if key not in items_map:
                 items_map[key] = {
                     "name": item.item_name,
@@ -1158,7 +1177,7 @@ def guest_request_cash_payment(
         db,
         AIEventCreate(
             event_type="CASH_PAYMENT_REQUEST",
-            message=f"{guest_name} at Table {table.number} wants to pay Γé╣{bill.total:.2f} in cash",
+            message=f"{guest_name} at Table {table.number} wants to pay ₹{bill.total:.2f} in cash",
             table_id=table.id,
         ),
     )
@@ -1195,9 +1214,67 @@ def guest_call_waiter(
             event_type="WAITER_CALL",
             message=f"{guest_name} at Table {table.number} needs help",
             table_id=table.id,
+            target_role="WAITER",
         ),
     )
+    from app.socket_manager import emit_sync
+    floor_id = str(table.floor_id) if table and table.floor_id else "floor-1"
+    emit_sync(
+        "waiter_call",
+        {
+            "tableId": table.id,
+            "tableNumber": table.number,
+            "guestName": guest_name,
+            "message": f"Table {table.number} called waiter",
+        },
+        room=floor_id,
+    )
     return {"ok": True}
+
+
+@router.post("/acknowledge-waiter-call")
+def acknowledge_waiter_call(
+    table_id: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    from app.models import AIEvent
+    from app.socket_manager import emit_sync
+
+    table = db.get(Table, table_id)
+    events = (
+        db.query(AIEvent)
+        .filter(AIEvent.table_id == table_id, AIEvent.event_type == "WAITER_CALL", AIEvent.resolved.is_(False))
+        .all()
+    )
+    for ev in events:
+        ev.acknowledged = True
+    db.commit()
+    floor_id = str(table.floor_id) if table and table.floor_id else "floor-1"
+    emit_sync("waiter_call_acknowledged", {"tableId": table_id, "status": "ON_IT"}, room=floor_id)
+    return {"ok": True, "acknowledgedCount": len(events)}
+
+
+@router.post("/resolve-waiter-call")
+def resolve_waiter_call(
+    table_id: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    from app.models import AIEvent
+    from app.socket_manager import emit_sync
+
+    table = db.get(Table, table_id)
+    events = (
+        db.query(AIEvent)
+        .filter(AIEvent.table_id == table_id, AIEvent.event_type == "WAITER_CALL", AIEvent.resolved.is_(False))
+        .all()
+    )
+    for ev in events:
+        ev.resolved = True
+        ev.acknowledged = True
+    db.commit()
+    floor_id = str(table.floor_id) if table and table.floor_id else "floor-1"
+    emit_sync("waiter_call_resolved", {"tableId": table_id}, room=floor_id)
+    return {"ok": True, "resolvedCount": len(events)}
 
 
 

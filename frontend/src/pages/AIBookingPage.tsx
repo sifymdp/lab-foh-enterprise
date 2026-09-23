@@ -110,7 +110,9 @@ async function request<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
-  const token = localStorage.getItem('customer_access_token')
+  const token =
+    localStorage.getItem('customer_access_token') ||
+    localStorage.getItem('foh_access_token')
 
   const response = await fetch(`${API}${path}`, {
     ...options,
@@ -141,8 +143,16 @@ export function AIBookingPage() {
   const location = useLocation()
   const navigate = useNavigate()
 
-  const loggedIn = Boolean(
-    localStorage.getItem('customer_access_token'),
+  const customerToken = localStorage.getItem('customer_access_token')
+  const staffToken = localStorage.getItem('foh_access_token')
+  const loggedIn = Boolean(customerToken || staffToken)
+
+  const isLoginPage = location.pathname === '/customer/login'
+  const isBookingsList = location.pathname === '/customer/bookings'
+  const isBookingView = !isLoginPage && !isBookingsList
+
+  const [customerContact, setCustomerContact] = useState<string>(
+    () => localStorage.getItem('customer_contact') || '',
   )
 
   const [email, setEmail] = useState('')
@@ -184,14 +194,11 @@ export function AIBookingPage() {
   const emailInputRef = useRef<HTMLInputElement>(null)
 
   /*
-    LOAD FLOOR OR BOOKINGS
+    LOAD FLOOR OR BOOKINGS & INITIAL AVAILABILITY
   */
 
   useEffect(() => {
-    if (
-      loggedIn &&
-      location.pathname === '/customer/booking'
-    ) {
+    if (loggedIn && isBookingView) {
       request<Floor>('/customer/layout')
         .then((value) => {
           setFloor(normalizeCustomerFloor(value))
@@ -199,12 +206,12 @@ export function AIBookingPage() {
         .catch((e) => {
           setError(e.message)
         })
+
+      // Immediately query live availability so interactive tables and AI suggestions load right away
+      void checkAvailability(date, time, guests)
     }
 
-    if (
-      loggedIn &&
-      location.pathname === '/customer/bookings'
-    ) {
+    if (loggedIn && isBookingsList) {
       request<Booking[]>('/customer/bookings')
         .then((value) => {
           setBookings(value)
@@ -339,6 +346,8 @@ export function AIBookingPage() {
         'customer_access_token',
         response.access_token,
       )
+      localStorage.setItem('customer_contact', email)
+      setCustomerContact(email)
 
       navigate('/customer/booking')
     } catch (e) {
@@ -350,6 +359,13 @@ export function AIBookingPage() {
     } finally {
       setBusy(false)
     }
+  }
+
+  const handleLogout = () => {
+    localStorage.removeItem('customer_access_token')
+    localStorage.removeItem('customer_contact')
+    setCustomerContact('')
+    navigate('/customer/login')
   }
 
   /*
@@ -556,9 +572,9 @@ export function AIBookingPage() {
     location.pathname === '/customer/login'
   ) {
     return (
-      <main className="login-page">
-        <section className="login-panel">
-          <div className="login-form">
+      <main className="customer-login-page">
+        <section className="customer-login-panel">
+          <div className="customer-login-card">
             <span className="brand-mark lg">
               FOH
             </span>
@@ -569,6 +585,53 @@ export function AIBookingPage() {
               Sign in with your email or mobile number
               to book directly with the restaurant.
             </p>
+
+            {loggedIn && customerContact && (
+              <div
+                style={{
+                  marginBottom: '1.25rem',
+                  padding: '1rem',
+                  background: 'rgba(59, 130, 246, 0.12)',
+                  border: '1px solid rgba(59, 130, 246, 0.35)',
+                  borderRadius: '16px',
+                  textAlign: 'center',
+                }}
+              >
+                <p
+                  style={{
+                    margin: '0 0 0.75rem 0',
+                    color: '#93c5fd',
+                    fontSize: '0.9rem',
+                  }}
+                >
+                  You are currently signed in as{' '}
+                  <strong>{customerContact}</strong>
+                </p>
+                <div
+                  style={{
+                    display: 'flex',
+                    gap: '10px',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <button
+                    className="btn btn-primary btn-sm"
+                    onClick={() =>
+                      navigate('/customer/booking')
+                    }
+                  >
+                    Continue to Booking →
+                  </button>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={handleLogout}
+                    style={{ color: '#f87171' }}
+                  >
+                    Sign Out
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div
               className="contact-switch"
@@ -629,7 +692,7 @@ export function AIBookingPage() {
                 placeholder={
                   contactMode === 'mobile'
                     ? '+91 9876543210'
-                    : ''
+                    : 'name@example.com'
                 }
                 value={email}
                 onChange={(e) =>
@@ -639,9 +702,49 @@ export function AIBookingPage() {
             </label>
 
             {developmentOtp && (
-              <p className="form-error">
-                Development OTP: {developmentOtp}
-              </p>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '10px 14px',
+                  background: 'rgba(34, 197, 94, 0.14)',
+                  border: '1px solid rgba(34, 197, 94, 0.4)',
+                  borderRadius: '12px',
+                  margin: '12px 0',
+                }}
+              >
+                <span
+                  style={{
+                    color: '#4ade80',
+                    fontSize: '0.875rem',
+                    fontWeight: 600,
+                  }}
+                >
+                  🔑 Code:{' '}
+                  <strong
+                    style={{
+                      color: '#fff',
+                      letterSpacing: '2px',
+                      fontSize: '1.05rem',
+                      marginLeft: '6px',
+                    }}
+                  >
+                    {developmentOtp}
+                  </strong>
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  style={{
+                    padding: '4px 10px',
+                    fontSize: '0.75rem',
+                  }}
+                  onClick={() => setCode(developmentOtp)}
+                >
+                  Fill Code
+                </button>
+              </div>
             )}
 
             <label className="field">
@@ -682,6 +785,33 @@ export function AIBookingPage() {
                 {error}
               </p>
             )}
+
+            <div
+              style={{
+                marginTop: '1.5rem',
+                textAlign: 'center',
+                fontSize: '0.85rem',
+                borderTop: '1px solid rgba(255,255,255,0.08)',
+                paddingTop: '1rem',
+              }}
+            >
+              <span style={{ color: '#94a3b8' }}>
+                Restaurant Staff?{' '}
+              </span>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                style={{
+                  color: '#60a5fa',
+                  textDecoration: 'underline',
+                  padding: '0 4px',
+                  fontWeight: 600,
+                }}
+                onClick={() => navigate('/login')}
+              >
+                Sign in to Host Stand →
+              </button>
+            </div>
           </div>
         </section>
       </main>
@@ -695,55 +825,55 @@ export function AIBookingPage() {
   if (pendingBooking) {
     return (
       <main className="customer-page">
-        <section className="panel">
-          <h1>Temporary table booking</h1>
-
-          <h2>
-            Table{' '}
-            {pendingBooking.tableNumber ||
-              pendingBooking.tableId}
-          </h2>
-
-          <p>
-            {formatCustomerBookingTime(
-              pendingBooking.reservedFor,
-            )}
+        <section className="customer-hold-card">
+          <h1 style={{ fontSize: '1.5rem', marginBottom: '0.5rem', color: 'var(--text, #0f172a)' }}>
+            Temporary Table Hold
+          </h1>
+          <p className="muted" style={{ marginBottom: '1.25rem' }}>
+            Your table is temporarily reserved. Confirm your booking before the timer expires.
           </p>
 
-          <p>
-            {pendingBooking.partySize} guests
-          </p>
-
-          <h2>
-            Hold expires in{' '}
-            {formatCountdown(secondsLeft)}
-          </h2>
-
-          <p className="muted">
-            Your table is temporarily reserved.
-            Confirm your booking before the timer
-            expires.
-          </p>
-
-          <button
-            className="btn btn-primary"
-            onClick={confirmBooking}
-            disabled={busy}
-          >
-            {busy
-              ? 'Confirming...'
-              : 'Confirm and pay'}
-          </button>
-
-          <button
-            className="btn btn-secondary"
-            onClick={() => {
-              setPendingBooking(null)
+          <div
+            style={{
+              background: 'var(--surface-2, #f8f9fb)',
+              border: '1px solid var(--border, #e2e8f0)',
+              borderRadius: '12px',
+              padding: '1.25rem',
+              marginBottom: '1.25rem',
             }}
-            disabled={busy}
           >
-            Back to booking
-          </button>
+            <h2 style={{ margin: '0 0 0.5rem 0', fontSize: '1.35rem', color: 'var(--text, #0f172a)' }}>
+              Table {pendingBooking.tableNumber || pendingBooking.tableId}
+            </h2>
+            <p style={{ margin: '0 0 0.25rem 0', color: 'var(--text-muted, #64748b)' }}>
+              🕒 {formatCustomerBookingTime(pendingBooking.reservedFor)} · 👥 {pendingBooking.partySize} guests
+            </p>
+          </div>
+
+          <div className="customer-hold-timer">
+            ⏱ Hold expires in {formatCountdown(secondsLeft)}
+          </div>
+
+          <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', marginTop: '1.5rem', flexWrap: 'wrap' }}>
+            <button
+              className="btn btn-primary"
+              onClick={confirmBooking}
+              disabled={busy}
+              style={{ minWidth: '160px' }}
+            >
+              {busy ? 'Confirming...' : '✓ Confirm Booking'}
+            </button>
+
+            <button
+              className="btn btn-secondary"
+              onClick={() => {
+                setPendingBooking(null)
+              }}
+              disabled={busy}
+            >
+              Back to Booking
+            </button>
+          </div>
 
           {error && (
             <p className="form-error">
@@ -765,16 +895,49 @@ export function AIBookingPage() {
     return (
       <main className="customer-page">
         <header>
-          <h1>My bookings</h1>
+          <div>
+            <h1>📋 My Table Bookings</h1>
+            <p className="muted">View your current and previous table reservations.</p>
+          </div>
 
-          <button
-            className="btn btn-secondary"
-            onClick={() =>
-              navigate('/customer/booking')
-            }
-          >
-            Book a table
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            {customerContact && (
+              <span
+                style={{
+                  fontSize: '0.85rem',
+                  color: '#94a3b8',
+                  background: 'rgba(255,255,255,0.06)',
+                  padding: '6px 12px',
+                  borderRadius: '12px',
+                }}
+              >
+                👤 {customerContact}
+              </span>
+            )}
+            <button
+              className="btn btn-primary"
+              onClick={() =>
+                navigate('/customer/booking')
+              }
+            >
+              🍽️ Book a table
+            </button>
+            <button
+              className="btn btn-secondary"
+              onClick={handleLogout}
+              style={{ color: '#f87171' }}
+            >
+              Sign Out
+            </button>
+            {staffToken && (
+              <button
+                className="btn btn-secondary"
+                onClick={() => navigate('/dashboard')}
+              >
+                ⚡ Host Stand
+              </button>
+            )}
+          </div>
         </header>
 
         {error && (
@@ -784,60 +947,69 @@ export function AIBookingPage() {
         )}
 
         {bookings.length === 0 && (
-          <section className="panel">
-            <p className="muted">
-              You do not have any bookings yet.
+          <section className="panel" style={{ textAlign: 'center', padding: '3rem 1.5rem' }}>
+            <p className="muted" style={{ fontSize: '1.05rem', marginBottom: '1rem' }}>
+              You do not have any table bookings yet.
             </p>
+            <button
+              className="btn btn-primary"
+              onClick={() => navigate('/customer/booking')}
+            >
+              🍽️ Reserve a Table Now
+            </button>
           </section>
         )}
 
-        {bookings.map((booking) => (
-          <article
-            className="panel"
-            key={booking.id}
-          >
-            <h2>
-              Table{' '}
-              {booking.tableNumber ||
-                booking.tableId}
-            </h2>
+        {bookings.map((booking) => {
+          const badgeClass =
+            booking.status === 'CONFIRMED'
+              ? 'customer-badge--confirmed'
+              : booking.status === 'CANCELLED'
+              ? 'customer-badge--cancelled'
+              : 'customer-badge--pending'
 
-            <p>
-              {formatCustomerBookingTime(
-                booking.reservedFor,
-              )}{' '}
-              · {booking.partySize} guests
-            </p>
+          return (
+            <article
+              className="customer-booking-card"
+              key={booking.id}
+            >
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '0.4rem' }}>
+                  <strong style={{ fontSize: '1.2rem', color: 'var(--text, #0f172a)' }}>
+                    Table {booking.tableNumber || booking.tableId}
+                  </strong>
+                  <span className={`customer-badge ${badgeClass}`}>
+                    {booking.status}
+                  </span>
+                </div>
 
-            <p>
-              <strong>
-                Booking: {booking.status}
-              </strong>
-            </p>
+                <p style={{ color: 'var(--text-muted, #64748b)', margin: '0 0 0.25rem 0' }}>
+                  🕒 {formatCustomerBookingTime(booking.reservedFor)} · 👥 {booking.partySize} guests
+                </p>
 
-            <p>
-              Payment:{' '}
-              <strong>
-                {booking.paymentStatus}
-              </strong>
-            </p>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-soft, #94a3b8)', margin: 0 }}>
+                  Payment: <strong>{booking.paymentStatus}</strong>
+                </p>
+              </div>
 
-            {[
-              'PENDING',
-              'CONFIRMED',
-            ].includes(booking.status) && (
-              <button
-                className="btn btn-secondary"
-                onClick={() =>
-                  cancel(booking.id)
-                }
-                disabled={busy}
-              >
-                Cancel booking
-              </button>
-            )}
-          </article>
-        ))}
+              {[
+                'PENDING',
+                'CONFIRMED',
+              ].includes(booking.status) && (
+                <button
+                  className="btn btn-secondary btn-sm"
+                  style={{ color: 'var(--danger, #dc2626)', borderColor: 'var(--border-strong, #cbd5e1)' }}
+                  onClick={() =>
+                    cancel(booking.id)
+                  }
+                  disabled={busy}
+                >
+                  Cancel booking
+                </button>
+              )}
+            </article>
+          )
+        })}
       </main>
     )
   }
@@ -850,22 +1022,52 @@ export function AIBookingPage() {
     <main className="customer-page">
       <header>
         <div>
-          <h1>Book a table</h1>
+          <h1>🍽️ Book a Table</h1>
 
           <p className="muted">
-            Choose a time, see the floor, and
+            Choose a date & time, see live table availability on the floor plan, and
             select an available table.
           </p>
         </div>
 
-        <button
-          className="btn btn-secondary"
-          onClick={() =>
-            navigate('/customer/bookings')
-          }
-        >
-          My bookings
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          {customerContact && (
+            <span
+              style={{
+                fontSize: '0.85rem',
+                color: '#94a3b8',
+                background: 'rgba(255,255,255,0.06)',
+                padding: '6px 12px',
+                borderRadius: '12px',
+              }}
+            >
+              👤 {customerContact}
+            </span>
+          )}
+          <button
+            className="btn btn-secondary"
+            onClick={() =>
+              navigate('/customer/bookings')
+            }
+          >
+            📋 My bookings
+          </button>
+          <button
+            className="btn btn-secondary"
+            onClick={handleLogout}
+            style={{ color: '#f87171' }}
+          >
+            Sign Out
+          </button>
+          {staffToken && (
+            <button
+              className="btn btn-primary"
+              onClick={() => navigate('/dashboard')}
+            >
+              ⚡ Host Stand
+            </button>
+          )}
+        </div>
       </header>
 
       <section className="panel">

@@ -218,10 +218,6 @@ export function AppShell() {
     const kds = { to: '/kds', label: 'KDS Board (Kanban)', icon: '⚡' }
     if (hasP('kitchen.view') || hasP('kds.view')) items.push(kds)
 
-    // Expo Menu Management (Member 2)
-    const expo = { to: '/expo', label: 'Expo Management', icon: '📋' }
-    if (hasP('kitchen.view') || hasP('kds.view') || role === 'OWNER' || role === 'MANAGER') items.push(expo)
-
     // AI Customer Booking & Waitlist Stand (Member 4)
     const booking = { to: '/booking', label: 'AI Booking Stand', icon: '🤖' }
     if (hasP('booking.view') || role === 'OWNER' || role === 'MANAGER') items.push(booking)

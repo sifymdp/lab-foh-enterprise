@@ -4,9 +4,22 @@ import { useGlobalPointerDrag } from '../../lib/useGlobalPointerDrag'
 import type { DiningSession, Table } from '../../types'
 import { OccupancyTimer } from './OccupancyTimer'
 
+export interface TableReservationInfo {
+  id: string
+  guestName: string
+  partySize: number
+  reservedFor: string
+}
+
 interface TableMarkerProps {
   table: Table
   session?: DiningSession
+  reservation?: TableReservationInfo
+  hasWaiterCall?: boolean
+  waiterCallState?: 'CALLING' | 'ON_IT' | boolean
+  isHighlighted?: boolean
+  isDimmed?: boolean
+  pendingOrdersCount?: number
   selected: boolean
   editable: boolean
   onSelect: (id: string) => void
@@ -16,6 +29,12 @@ interface TableMarkerProps {
 export function TableMarker({
   table,
   session,
+  reservation,
+  hasWaiterCall,
+  waiterCallState,
+  isHighlighted,
+  isDimmed,
+  pendingOrdersCount,
   selected,
   editable,
   onSelect,
@@ -30,6 +49,9 @@ export function TableMarker({
   const style = STATUS_CONFIG[table.status] ?? STATUS_CONFIG.AVAILABLE
   const isCircle = table.shape === 'CIRCLE'
   const showTimer = session && OCCUPIED_STATUSES.includes(table.status)
+
+  const isCalling = waiterCallState === 'CALLING' || (waiterCallState === true && hasWaiterCall) || (hasWaiterCall && !waiterCallState)
+  const isOnIt = waiterCallState === 'ON_IT'
 
   const rect = { x: live.x, y: live.y, width: live.width, height: live.height }
 
@@ -59,6 +81,10 @@ export function TableMarker({
         selected ? 'table-marker--selected' : '',
         editable ? 'table-marker--editable' : '',
         dragging ? 'table-marker--dragging' : '',
+        isCalling ? 'table-marker--waiter-calling' : '',
+        isOnIt ? 'table-marker--waiter-on-it' : '',
+        isHighlighted ? 'table-marker--highlighted' : '',
+        isDimmed ? 'table-marker--dimmed' : '',
       ]
         .filter(Boolean)
         .join(' ')}
@@ -118,6 +144,110 @@ export function TableMarker({
           }}
         >
           🧾 BILLING
+        </span>
+      )}
+      {isCalling && (
+        <span
+          className="table-marker__waiter-call"
+          style={{
+            position: 'absolute',
+            top: -12,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: '#ef4444',
+            color: '#ffffff',
+            fontSize: '10px',
+            fontWeight: 800,
+            padding: '2px 9px',
+            borderRadius: '999px',
+            boxShadow: '0 2px 10px rgba(239, 68, 68, 0.8)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            zIndex: 20,
+            whiteSpace: 'nowrap',
+          }}
+          title="Customer requested assistance - BLINKING"
+        >
+          🔔 CALL WAITER
+        </span>
+      )}
+      {isOnIt && (
+        <span
+          className="table-marker__waiter-call"
+          style={{
+            position: 'absolute',
+            top: -12,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: '#f59e0b',
+            color: '#ffffff',
+            fontSize: '10px',
+            fontWeight: 800,
+            padding: '2px 9px',
+            borderRadius: '999px',
+            boxShadow: '0 2px 8px rgba(245, 158, 11, 0.6)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            zIndex: 20,
+            whiteSpace: 'nowrap',
+          }}
+          title="Staff is on the way / attending"
+        >
+          🏃 ON THE WAY
+        </span>
+      )}
+      {Boolean(pendingOrdersCount && pendingOrdersCount > 0) && (
+        <span
+          style={{
+            position: 'absolute',
+            top: -10,
+            right: -6,
+            background: '#f59e0b',
+            color: '#ffffff',
+            fontSize: '9px',
+            fontWeight: 800,
+            padding: '2px 6px',
+            borderRadius: '999px',
+            boxShadow: '0 2px 6px rgba(245, 158, 11, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '3px',
+            zIndex: 15,
+            whiteSpace: 'nowrap',
+          }}
+          title={`${pendingOrdersCount} orders waiting for waiter approval`}
+        >
+          ⏳ {pendingOrdersCount} NEW
+        </span>
+      )}
+      {(table.status === 'RESERVED' || reservation) && (
+        <span
+          style={{
+            position: 'absolute',
+            bottom: -8,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: '#2563eb',
+            color: '#ffffff',
+            fontSize: '9px',
+            fontWeight: 700,
+            padding: '2px 7px',
+            borderRadius: '999px',
+            boxShadow: '0 2px 6px rgba(37, 99, 235, 0.4)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '3px',
+            zIndex: 10,
+            whiteSpace: 'nowrap',
+            maxWidth: '120px',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}
+          title={reservation ? `Reserved: ${reservation.guestName} (${reservation.partySize}p)` : 'Reserved'}
+        >
+          📅 {reservation ? reservation.guestName : 'RESERVED'}
         </span>
       )}
       {showHandles && (

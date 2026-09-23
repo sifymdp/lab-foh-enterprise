@@ -1,13 +1,14 @@
-﻿from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field
 
 
 class CustomerEmail(BaseModel):
-    contact: str = Field(min_length=5, max_length=255)
+    contact: str | None = None
     email: str | None = None
 
     @property
     def identity(self) -> str:
-        return self.contact.strip().lower()
+        val = self.contact or self.email or ""
+        return val.strip().lower()
 
 
 class CustomerVerify(BaseModel):

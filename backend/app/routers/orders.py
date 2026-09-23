@@ -75,6 +75,7 @@ def kitchen_orders(
         .filter(
             Order.tenant_id == user.tenant_id,
             Order.status.in_(["RECEIVED", "CONFIRMED", "PREPARING", "READY"]),
+            Order.approval_status == "APPROVED",
         )
     )
     if user.branch_id:
@@ -201,6 +202,7 @@ def place_order(
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
         tenant_id = current_user.tenant_id
         branch_id = current_user.branch_id
+        body = body.model_copy(update={"source": "waiter", "approval_status": "APPROVED"})
     elif table_token:
         qr = (
             db.query(TableQRCode)
@@ -215,7 +217,31 @@ def place_order(
         if table:
             tenant_id = table.tenant_id
             branch_id = table.branch_id
-        body = body.model_copy(update={"table_id": qr.table_id})
+        body = body.model_copy(update={"table_id": qr.table_id, "source": "guest", "approval_status": "PENDING"})
     else:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
     return order_service.create_order(db, body, tenant_id=tenant_id, branch_id=branch_id)
+
+
+class RejectOrderIn(BaseModel):
+    reason: str | None = None
+
+
+@router.post("/{order_id}/approve", response_model=OrderOut)
+def approve_order_endpoint(
+    order_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> OrderOut:
+    return order_service.approve_order(db, order_id, user_id=user.id)
+
+
+@router.post("/{order_id}/reject", response_model=OrderOut)
+def reject_order_endpoint(
+    order_id: str,
+    body: RejectOrderIn | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> OrderOut:
+    reason = body.reason if body else None
+    return order_service.reject_order(db, order_id, reason=reason, user_id=user.id)

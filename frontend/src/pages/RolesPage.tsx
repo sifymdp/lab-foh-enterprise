@@ -84,6 +84,8 @@ const DEFAULT_CATEGORIES: PermCategory[] = [
       { code: 'orders.update', label: 'Edit Order Items', description: 'Add dishes, change quantities, and add cooking notes' },
       { code: 'orders.confirm', label: 'Fire to Kitchen', description: 'Dispatch tickets directly to kitchen stations' },
       { code: 'orders.serve', label: 'Mark as Served', description: 'Update delivery status when dishes reach guests' },
+      { code: 'orders.approve', label: 'Approve Guest Orders', description: 'Approve customer-placed orders from QR menu before sending to kitchen' },
+      { code: 'orders.reject', label: 'Reject Guest Orders', description: 'Reject customer-placed orders with reason (unavailable, closed, etc.)' },
     ],
   },
   {
@@ -99,6 +101,15 @@ const DEFAULT_CATEGORIES: PermCategory[] = [
       { code: 'kds.bump', label: 'Bump Completed Orders', description: 'Clear finished tickets from the KDS display' },
       { code: 'kds.recall', label: 'Recall Bumped Orders', description: 'Bring back bumped tickets to the active queue' },
       { code: 'kds.priority', label: 'Change Ticket Priority', description: 'Escalate or de-prioritize kitchen ticket order' },
+    ],
+  },
+  {
+    id: 'menu',
+    label: 'Menu Management',
+    icon: '📋',
+    description: 'Menu items, categories, pricing, and dish availability',
+    perms: [
+      { code: 'menu.view', label: 'View Menu Items', description: 'Read-only access to the menu catalogue and pricing' },
       { code: 'menu.manage', label: 'Manage Menu Items', description: 'Add dishes, set pricing, categories, and ingredients' },
     ],
   },
@@ -129,6 +140,35 @@ const DEFAULT_CATEGORIES: PermCategory[] = [
       { code: 'cashier.shift.start', label: 'Open Cashier Shift', description: 'Declare opening drawer float and start shift' },
       { code: 'cashier.shift.end', label: 'Close Cashier Shift', description: 'Reconcile drawer cash and finalize shift totals' },
       { code: 'cashier.shift.view', label: 'View Shift Summaries', description: 'Review current and historical cashier shift reports' },
+    ],
+  },
+  {
+    id: 'customer',
+    label: 'Customer & Guest Portal',
+    icon: '🧑‍💼',
+    description: 'Customer booking portal, QR code guest ordering, OTP login, and guest session management',
+    perms: [
+      { code: 'customer.view', label: 'View Customer Data', description: 'See customer booking history, profiles, and visit logs' },
+      { code: 'customer.manage', label: 'Manage Customer Portal', description: 'Configure QR menus, guest ordering rules, and OTP settings' },
+    ],
+  },
+  {
+    id: 'ai_insights',
+    label: 'AI & Insights',
+    icon: '🤖',
+    description: 'AI-powered predictions, operational insights, demand forecasting, and anomaly detection',
+    perms: [
+      { code: 'insights.view', label: 'View Operational Insights', description: 'Access real-time operational dashboards and wait-time analytics' },
+      { code: 'ai.features', label: 'Use AI Features', description: 'Cooking time prediction, station routing, demand forecast, and anomaly detection' },
+    ],
+  },
+  {
+    id: 'voice',
+    label: 'Voice & Telephony',
+    icon: '📞',
+    description: 'Voice call reservation system, Twilio webhook, and transcript parsing',
+    perms: [
+      { code: 'voice.manage', label: 'Manage Voice System', description: 'Configure voice call booking, Twilio integration, and call logs' },
     ],
   },
   {
@@ -169,7 +209,7 @@ const ROLE_META: Record<string, { color: string; icon: string }> = {
   CHEF: { color: '#ef4444', icon: '👨‍🍳' },
 }
 
-const STORAGE_CUSTOM_CATEGORIES_KEY = 'foh_custom_permission_categories_v9'
+const STORAGE_CUSTOM_CATEGORIES_KEY = 'foh_custom_permission_categories_v10'
 
 export function RolesPage() {
   const [matrixData, setMatrixData] = useState<any>({ permissions: [], roles: [], matrix: [] })
@@ -601,47 +641,61 @@ export function RolesPage() {
         {/* ── Right Main Panel: Category Menu & Permissions ── */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '1rem' }}>
 
-          {/* Top Bar: Category Menu & Active Category Chips */}
+          {/* Top Bar: Category Menu + Organized Active Category Grid */}
           <div style={{
-            padding: '0.85rem 1.15rem',
+            padding: '1rem 1.25rem',
             background: 'var(--bg-elevated)',
             borderRadius: '12px',
             border: '1px solid var(--border)',
             boxShadow: 'var(--shadow-sm)',
             display: 'flex',
-            alignItems: 'center',
+            flexDirection: 'column',
             gap: '0.85rem',
-            flexWrap: 'wrap',
           }}>
-            {/* Main "Category Menu" button */}
-            <button
-              type="button"
-              onClick={() => setActiveView('MENU')}
-              style={{
-                padding: '0.55rem 1.15rem',
-                borderRadius: '8px',
-                border: activeView === 'MENU' ? '2px solid #3b82f6' : '1px solid var(--border)',
-                background: activeView === 'MENU' ? '#3b82f6' : 'var(--surface-2)',
-                color: activeView === 'MENU' ? '#ffffff' : 'var(--text)',
-                fontWeight: 700,
-                fontSize: '0.875rem',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                boxShadow: activeView === 'MENU' ? '0 2px 8px rgba(59, 130, 246, 0.3)' : 'none',
-                transition: 'all 0.15s ease',
-              }}
-            >
-              <span>📂</span>
-              <span>Category Menu</span>
-            </button>
+            {/* Row 1: Category Menu button + summary */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
+              <button
+                type="button"
+                onClick={() => setActiveView('MENU')}
+                style={{
+                  padding: '0.6rem 1.25rem',
+                  borderRadius: '10px',
+                  border: activeView === 'MENU' ? '2px solid #3b82f6' : '1px solid var(--border)',
+                  background: activeView === 'MENU' ? '#3b82f6' : 'var(--surface-2)',
+                  color: activeView === 'MENU' ? '#ffffff' : 'var(--text)',
+                  fontWeight: 700,
+                  fontSize: '0.9rem',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  boxShadow: activeView === 'MENU' ? '0 2px 8px rgba(59, 130, 246, 0.3)' : 'none',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <span>📂</span>
+                <span>Category Menu</span>
+              </button>
 
-            {/* Separator */}
-            <span style={{ color: 'var(--border)', fontSize: '1.2rem' }}>|</span>
+              <span style={{
+                fontSize: '0.78rem',
+                fontWeight: 600,
+                color: 'var(--text-muted)',
+                letterSpacing: '0.02em',
+              }}>
+                {activeOnCategories.length} / {categories.length} categories active for <strong style={{ color: '#2563eb' }}>{selectedRole}</strong>
+              </span>
+            </div>
 
-            {/* Display all ON Permission Categories dynamically next to Category Menu */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', flex: 1 }}>
+            {/* Row 2: Separator */}
+            <div style={{ borderTop: '1px solid var(--border)' }} />
+
+            {/* Row 3: Category chips in a clean grid */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+              gap: '0.5rem',
+            }}>
               {activeOnCategories.map((cat) => {
                 const isCurrentActive = activeView === cat.id
                 const enCount = categoryEnabledCount(cat)
@@ -653,31 +707,36 @@ export function RolesPage() {
                     type="button"
                     onClick={() => setActiveView(cat.id)}
                     style={{
-                      padding: '0.45rem 0.85rem',
-                      borderRadius: '20px',
-                      border: isCurrentActive ? '2px solid #3b82f6' : '1px solid rgba(59, 130, 246, 0.3)',
-                      background: isCurrentActive ? '#eff6ff' : 'rgba(59, 130, 246, 0.06)',
+                      padding: '0.55rem 0.9rem',
+                      borderRadius: '10px',
+                      border: isCurrentActive ? '2px solid #3b82f6' : '1px solid #e2e8f0',
+                      background: isCurrentActive ? '#eff6ff' : '#f8fafc',
                       color: isCurrentActive ? '#1d4ed8' : 'var(--text)',
                       fontWeight: isCurrentActive ? 700 : 500,
-                      fontSize: '0.875rem',
+                      fontSize: '0.82rem',
                       cursor: 'pointer',
                       display: 'flex',
                       alignItems: 'center',
-                      gap: '0.4rem',
-                      boxShadow: isCurrentActive ? '0 0 0 1px #3b82f6' : 'none',
+                      gap: '0.5rem',
+                      boxShadow: isCurrentActive
+                        ? '0 0 0 1px #3b82f6, 0 2px 6px rgba(59,130,246,0.15)'
+                        : '0 1px 2px rgba(0,0,0,0.04)',
                       transition: 'all 0.15s ease',
+                      textAlign: 'left',
+                      width: '100%',
                     }}
                     title={`Click to configure individual permissions for ${cat.label}`}
                   >
-                    <span>{cat.icon}</span>
-                    <span>{cat.label}</span>
+                    <span style={{ fontSize: '1rem', flexShrink: 0 }}>{cat.icon}</span>
+                    <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{cat.label}</span>
                     <span style={{
-                      fontSize: '0.75rem',
+                      fontSize: '0.7rem',
                       fontWeight: 700,
-                      padding: '0.08rem 0.35rem',
+                      padding: '0.15rem 0.45rem',
                       borderRadius: '99px',
-                      background: '#dcfce7',
-                      color: '#16a34a',
+                      background: isCurrentActive ? '#2563eb' : '#dcfce7',
+                      color: isCurrentActive ? '#ffffff' : '#16a34a',
+                      flexShrink: 0,
                     }}>
                       {isOwner ? 'ALL' : `${enCount}/${totCount}`}
                     </span>

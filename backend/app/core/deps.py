@@ -15,11 +15,19 @@ bearer_scheme = HTTPBearer(auto_error=False)
 
 def get_customer_email(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    db: Session = Depends(get_db),
 ) -> str:
-    email = decode_customer_token(credentials.credentials) if credentials and credentials.credentials else None
-    if not email:
+    if not credentials or not credentials.credentials:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Customer login required")
-    return email
+    email = decode_customer_token(credentials.credentials)
+    if email:
+        return email
+    user_id = decode_token(credentials.credentials)
+    if user_id:
+        user = db.get(User, user_id)
+        if user and user.is_active:
+            return user.email
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Customer login required")
 
 
 def get_current_user(

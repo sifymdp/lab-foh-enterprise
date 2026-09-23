@@ -35,7 +35,6 @@ import { TablePayPage } from './pages/TablePayPage'
 import { BillDetailPage } from './pages/BillDetailPage'
 import { KDSPage } from './pages/KDSPage'
 import { KitchenPage } from './pages/KitchenPage'
-import { ExpoMenuManagementPage } from './pages/ExpoMenuManagementPage'
 import { AIBookingPage } from './pages/AIBookingPage'
 
 function DashboardSwitcher() {
@@ -71,8 +70,15 @@ export default function App() {
           <SocketProvider>
             <Routes>
             <Route path="/login" element={<LoginPage />} />
-            <Route path="/book" element={<AIBookingPage />} />
+            {/* Public Customer Routes */}
+            <Route path="/customer/login" element={<AIBookingPage />} />
+            <Route path="/customer/booking" element={<AIBookingPage />} />
+            <Route path="/customer/bookings" element={<AIBookingPage />} />
             <Route path="/customer/book" element={<AIBookingPage />} />
+            <Route path="/customer-booking" element={<Navigate to="/customer/booking" replace />} />
+            <Route path="/customer" element={<Navigate to="/customer/booking" replace />} />
+            <Route path="/book" element={<Navigate to="/customer/booking" replace />} />
+            {/* Guest Self-Payment Routes */}
             <Route path="/pay/:billId" element={<TablePayPage />} />
             <Route path="/table-pay/:billId" element={<TablePayPage />} />
             <Route element={<ProtectedRoute />}>
@@ -102,7 +108,6 @@ export default function App() {
                 <Route path="insights" element={<InsightsPage />} />
                 <Route path="kitchen" element={<KitchenPage />} />
                 <Route path="kds" element={<KDSPage />} />
-                <Route path="expo" element={<ExpoMenuManagementPage />} />
                 <Route path="booking" element={<AIBookingPage />} />
                 <Route path="users" element={<UsersPage />} />
                 <Route element={<OwnerRoute />}>
