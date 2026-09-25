@@ -12,11 +12,11 @@ export function KDSSwitch({ currentView }: KDSSwitchProps) {
       type="button"
       onClick={() => navigate(currentView === 'kds' ? '/kitchen' : '/kds')}
       className="kds-switch-btn"
-      title={`Switch to ${currentView === 'kds' ? 'Station Queue' : 'Kanban Board'} view`}
+      title={`Switch to ${currentView === 'kds' ? 'Kitchen Queue' : 'KDS Board'} view`}
     >
       <span className="kds-switch-btn__icon">🔀</span>
       <span className="kds-switch-btn__text">
-        {currentView === 'kds' ? 'Switch to Station Queue' : 'Switch to Kanban Board'}
+        {currentView === 'kds' ? 'Switch to Kitchen Queue' : 'Switch to KDS Board'}
       </span>
     </button>
   )

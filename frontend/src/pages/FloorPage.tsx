@@ -5,6 +5,7 @@ import { useSocket } from '../context/SocketContext'
 import { canEditFloor } from '../lib/permissions'
 import { computeFloorStats } from '../lib/floorStats'
 import { newLabel, newSection } from '../lib/floorTemplates'
+import { playWaiterBell } from '../lib/soundAlerts'
 import { AddTableModal } from '../components/floor/AddTableModal'
 import { FloorLayoutToolbar, LayoutEditorPanel } from '../components/floor/LayoutEditorPanel'
 import type { CanvasSelection } from '../components/floor/FloorPlanCanvas'
@@ -51,6 +52,7 @@ export function FloorPage() {
   const floorDisplayRef = useRef<HTMLDivElement>(null)
 
   const [waiterCalls, setWaiterCalls] = useState<Record<string, 'CALLING' | 'ON_IT'>>({})
+  const [cashCalls, setCashCalls] = useState<Record<string, { state: 'CALLING' | 'ON_IT'; guestName?: string; amount?: number; message?: string }>>({})
   const [reservationsMap, setReservationsMap] = useState<Record<string, { id: string; guestName: string; partySize: number; reservedFor: string }>>({})
   const [pendingOrdersMap, setPendingOrdersMap] = useState<Record<string, number>>({})
 
@@ -91,12 +93,21 @@ export function FloorPage() {
     import('../api/extensions').then(({ aiApi, reservationsApi, ordersApi }) => {
       aiApi.getAlerts(false).then((alerts) => {
         const calls: Record<string, 'CALLING' | 'ON_IT'> = {}
+        const cash: Record<string, { state: 'CALLING' | 'ON_IT'; guestName?: string; amount?: number; message?: string }> = {}
         alerts.forEach((a) => {
           if (a.eventType === 'WAITER_CALL' && a.tableId && !a.resolved) {
             calls[a.tableId] = a.acknowledged ? 'ON_IT' : 'CALLING'
+          } else if (a.eventType === 'CASH_PAYMENT_REQUEST' && a.tableId && !a.resolved) {
+            cash[a.tableId] = {
+              state: a.acknowledged ? 'ON_IT' : 'CALLING',
+              guestName: (a.metadata as any)?.customer_name || 'Guest',
+              amount: (a.metadata as any)?.amount,
+              message: a.message,
+            }
           }
         })
         setWaiterCalls((prev) => ({ ...prev, ...calls }))
+        setCashCalls((prev) => ({ ...prev, ...cash }))
       }).catch(() => {})
 
       reservationsApi.list().then((resList) => {
@@ -136,6 +147,7 @@ export function FloorPage() {
     const unsubWaiter = on('waiter_call', (payload: any) => {
       if (payload?.tableId) {
         setWaiterCalls((prev) => ({ ...prev, [payload.tableId]: 'CALLING' }))
+        playWaiterBell()
       }
     })
     const unsubWaiterAck = on('waiter_call_acknowledged', (payload: any) => {
@@ -146,6 +158,43 @@ export function FloorPage() {
     const unsubWaiterResolved = on('waiter_call_resolved', (payload: any) => {
       if (payload?.tableId) {
         setWaiterCalls((prev) => {
+          const next = { ...prev }
+          delete next[payload.tableId]
+          return next
+        })
+      }
+    })
+    const unsubCashReq = on('cash_payment_requested', (payload: any) => {
+      if (payload?.tableId) {
+        setCashCalls((prev) => ({
+          ...prev,
+          [payload.tableId]: {
+            state: 'CALLING',
+            guestName: payload.guestName || 'Guest',
+            amount: payload.amount,
+            message: payload.message,
+          },
+        }))
+        playWaiterBell()
+      }
+    })
+    const unsubCashAck = on('cash_payment_acknowledged', (payload: any) => {
+      if (payload?.tableId) {
+        setCashCalls((prev) => {
+          const existing = prev[payload.tableId]
+          return {
+            ...prev,
+            [payload.tableId]: {
+              ...existing,
+              state: 'ON_IT',
+            },
+          }
+        })
+      }
+    })
+    const unsubCashResolved = on('cash_payment_resolved', (payload: any) => {
+      if (payload?.tableId) {
+        setCashCalls((prev) => {
           const next = { ...prev }
           delete next[payload.tableId]
           return next
@@ -212,6 +261,9 @@ export function FloorPage() {
       unsubWaiter()
       unsubWaiterAck()
       unsubWaiterResolved()
+      unsubCashReq()
+      unsubCashAck()
+      unsubCashResolved()
       unsubPendingOrder()
       unsubApproved()
       unsubRejected()
@@ -238,6 +290,34 @@ export function FloorPage() {
         delete next[tableId]
         return next
       })
+    } catch {}
+  }
+
+  const handleOnItCashCall = async (tableId: string) => {
+    try {
+      await fetch(`http://127.0.0.1:8000/guest/acknowledge-cash-payment?table_id=${tableId}`, { method: 'POST' })
+      setCashCalls((prev) => {
+        if (!prev[tableId]) return prev
+        return {
+          ...prev,
+          [tableId]: {
+            ...prev[tableId],
+            state: 'ON_IT',
+          },
+        }
+      })
+    } catch {}
+  }
+
+  const handleResolveCashCall = async (tableId: string) => {
+    try {
+      await fetch(`http://127.0.0.1:8000/guest/resolve-cash-payment?table_id=${tableId}`, { method: 'POST' })
+      setCashCalls((prev) => {
+        const next = { ...prev }
+        delete next[tableId]
+        return next
+      })
+      await refresh()
     } catch {}
   }
 
@@ -477,6 +557,7 @@ export function FloorPage() {
               floor={displayFloor}
               sessions={sessions}
               waiterCalls={waiterCalls}
+              cashCalls={cashCalls}
               reservations={reservationsMap}
               pendingOrders={pendingOrdersMap}
               statusFilter={statusFilter}
@@ -502,10 +583,15 @@ export function FloorPage() {
                 table={selectedTable}
                 hasWaiterCall={Boolean(waiterCalls[selectedTable.id])}
                 waiterCallState={waiterCalls[selectedTable.id]}
+                hasCashCall={Boolean(cashCalls[selectedTable.id])}
+                cashCallState={cashCalls[selectedTable.id]?.state}
+                cashCallInfo={cashCalls[selectedTable.id]}
                 reservation={reservationsMap[selectedTable.id]}
                 onOnItWaiterCall={() => handleOnItWaiterCall(selectedTable.id)}
                 onResolveWaiterCall={() => handleResolveWaiterCall(selectedTable.id)}
                 onDismissWaiterCall={() => handleResolveWaiterCall(selectedTable.id)}
+                onOnItCashCall={() => handleOnItCashCall(selectedTable.id)}
+                onResolveCashCall={() => handleResolveCashCall(selectedTable.id)}
                 onClose={() => setSelection(null)}
                 onSeatGuests={() => setSeatTable(selectedTable)}
                 onTakeOrder={() => setOrderTable(selectedTable)}

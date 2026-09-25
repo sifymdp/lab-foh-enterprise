@@ -11,6 +11,7 @@ interface FloorPlanCanvasProps {
   floor: Floor
   sessions: DiningSession[]
   waiterCalls?: Record<string, 'CALLING' | 'ON_IT' | boolean>
+  cashCalls?: Record<string, { state: 'CALLING' | 'ON_IT'; guestName?: string; amount?: number; message?: string }>
   reservations?: Record<string, TableReservationInfo>
   pendingOrders?: Record<string, number>
   statusFilter?: import('../../types').TableStatus | null
@@ -26,6 +27,7 @@ export function FloorPlanCanvas({
   floor,
   sessions,
   waiterCalls = {},
+  cashCalls = {},
   reservations = {},
   pendingOrders = {},
   statusFilter,
@@ -92,6 +94,7 @@ export function FloorPlanCanvas({
         session={session}
         hasWaiterCall={Boolean(waiterCallState)}
         waiterCallState={waiterCallState}
+        cashCallState={cashCalls[table.id]?.state}
         isHighlighted={isHighlighted}
         isDimmed={isDimmed}
         reservation={reservations[table.id]}

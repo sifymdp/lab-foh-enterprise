@@ -51,6 +51,61 @@ def _slugify(text: str) -> str:
     return "".join(c if c.isalnum() else "-" for c in text.lower()).strip("-")
 
 
+def _get_allergen_badges_html(name: str, desc: str, category: str) -> str:
+    if category in ("Liquor & Cocktails", "Drinks"):
+        return ""
+    text = f"{name} {desc}".lower()
+    badges = []
+
+    non_veg = any(
+        k in text
+        for k in [
+            "chicken", "mutton", "lamb", "prawn", "prawns", "fish", "sea bass",
+            "steak", "meat", "duck", "egg", "calamari", "pork"
+        ]
+    )
+    has_dairy = any(
+        k in text
+        for k in [
+            "butter", "ghee", "cream", "cheese", "paneer", "burrata", "alfredo",
+            "rabri", "gelato", "tiramisu", "mascarpone", "milk"
+        ]
+    )
+    has_nuts = any(
+        k in text
+        for k in ["cashew", "almond", "walnut", "peanut", "pistachio", "nut"]
+    )
+    has_gluten = any(
+        k in text
+        for k in [
+            "parotta", "naan", "roti", "sheermal", "noodles", "dumpling", "dim sum",
+            "wheat", "flour", "bread", "pasta", "fettuccine", "brioche", "tiramisu",
+            "fondant", "sourdough", "crust"
+        ]
+    )
+
+    if not non_veg:
+        if not has_dairy and "honey" not in text:
+            badges.append('<span class="tag tag--vegan">🌱 Vegan</span>')
+        else:
+            badges.append('<span class="tag tag--veg">🥦 Vegetarian</span>')
+
+    if not has_gluten:
+        badges.append('<span class="tag tag--gf">🌾 Gluten-Free</span>')
+
+    if not has_dairy:
+        badges.append('<span class="tag tag--df">🥛 Dairy-Free</span>')
+
+    if not has_nuts:
+        badges.append('<span class="tag tag--nf">🥜 Nut-Free</span>')
+    else:
+        badges.append('<span class="tag tag--nuts">⚠️ Contains Nuts</span>')
+
+    if not badges:
+        return ""
+    return f'<div class="tags-list">{"".join(badges[:3])}</div>'
+
+
 def _build_guest_menu_html(
     *,
     token: str,
@@ -85,20 +140,35 @@ def _build_guest_menu_html(
         items_html = []
         for item in items_by_category[category]:
             desc = html.escape(item.description or "")
+            tags_html = _get_allergen_badges_html(item.name, item.description or "", category)
             items_html.append(
                 f"""
                 <article class="menu-item" data-id="{html.escape(item.id)}"
                          data-name="{html.escape(item.name)}"
-                         data-price="{float(item.price):.2f}">
-                  <div class="menu-item__info">
-                    <h3>{html.escape(item.name)}</h3>
-                    {f'<p class="desc">{desc}</p>' if desc else ''}
-                    <p class="price">₹{float(item.price):.2f}</p>
+                         data-price="{float(item.price):.2f}"
+                         onclick="handleItemCardClick(event, '{html.escape(item.id)}')">
+                  <div class="menu-item__row">
+                    <div class="menu-item__info">
+                      <h3>{html.escape(item.name)}</h3>
+                      {tags_html}
+                      {f'<p class="desc">{desc}</p>' if desc else ''}
+                      <p class="price">₹{float(item.price):.2f}</p>
+                    </div>
+                    <div class="stepper-wrap" onclick="event.stopPropagation()">
+                      <button type="button" class="btn-add-initial" id="add-btn-{html.escape(item.id)}" onclick="changeQty('{html.escape(item.id)}', 1)">
+                        + ADD
+                      </button>
+                      <div class="stepper" id="stepper-{html.escape(item.id)}" style="display:none;">
+                        <button type="button" class="stepper__btn" onclick="changeQty('{html.escape(item.id)}', -1)" aria-label="Remove one">−</button>
+                        <span class="stepper__qty" id="qty-{html.escape(item.id)}">0</span>
+                        <button type="button" class="stepper__btn stepper__btn--add" onclick="changeQty('{html.escape(item.id)}', 1)" aria-label="Add one">+</button>
+                      </div>
+                    </div>
                   </div>
-                  <div class="stepper">
-                    <button type="button" class="stepper__btn" onclick="changeQty('{html.escape(item.id)}', -1)" aria-label="Remove one">−</button>
-                    <span class="stepper__qty" id="qty-{html.escape(item.id)}">0</span>
-                    <button type="button" class="stepper__btn stepper__btn--add" onclick="changeQty('{html.escape(item.id)}', 1)" aria-label="Add one">+</button>
+                  <div class="item-custom-note-wrap" id="note-wrap-{html.escape(item.id)}" onclick="event.stopPropagation()">
+                    <input type="text" class="item-custom-note-input" id="note-{html.escape(item.id)}"
+                           placeholder="✎ Add special note (e.g. less spicy, no onion)..."
+                           oninput="updateItemNote('{html.escape(item.id)}', this.value)" />
                   </div>
                 </article>
                 """
@@ -171,25 +241,74 @@ def _build_guest_menu_html(
     .category.is-active {{ display: block; }}
     .category h2 {{ font-size: 1.15rem; font-weight: 500; margin: 0 0 14px; color: var(--green); }}
     .menu-item {{
-      display: flex; gap: 12px; align-items: center;
+      display: flex; flex-direction: column; gap: 8px;
       background: #fff; border-radius: 14px; padding: 14px;
       margin-bottom: 10px; border: 1px solid var(--line);
     }}
+    .menu-item__row {{ display: flex; gap: 12px; align-items: center; width: 100%; }}
     .menu-item__info {{ flex: 1; min-width: 0; }}
     .menu-item h3 {{ margin: 0 0 3px; font-size: 0.96rem; font-weight: 600; font-family: 'Inter', sans-serif; }}
+    .tags-list {{ display: flex; flex-wrap: wrap; gap: 5px; margin: 4px 0 6px; }}
+    .tag {{
+      font-size: 0.68rem; font-weight: 700; padding: 2px 7px; border-radius: 6px;
+      letter-spacing: 0.02em; display: inline-flex; align-items: center; gap: 3px;
+    }}
+    .tag--vegan {{ background: #dcfce7; color: #15803d; border: 1px solid #bbf7d0; }}
+    .tag--veg {{ background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }}
+    .tag--gf {{ background: #fef3c7; color: #b45309; border: 1px solid #fde68a; }}
+    .tag--df {{ background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; }}
+    .tag--nf {{ background: #f3e8ff; color: #6b21a8; border: 1px solid #e9d5ff; }}
+    .tag--nuts {{ background: #ffedd5; color: #9a3412; border: 1px solid #fed7aa; }}
     .desc {{ margin: 0 0 6px; font-size: 0.8rem; color: var(--muted); line-height: 1.4; }}
-    .price {{ margin: 0; font-weight: 600; color: var(--green); font-size: 0.9rem; }}
+    .price {{ margin: 0; font-weight: 700; color: var(--green); font-size: 0.95rem; }}
+    .btn-add-initial {{
+      background: #fff; color: var(--green); border: 1.5px solid var(--gold);
+      border-radius: 999px; padding: 7px 18px; font-size: 0.85rem; font-weight: 700;
+      cursor: pointer; font-family: 'Inter', sans-serif; box-shadow: 0 2px 5px rgba(0,0,0,0.06);
+      transition: all 0.15s ease; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+    }}
+    .btn-add-initial:active {{
+      transform: scale(0.94); background: var(--gold); color: #fff;
+    }}
+    .stepper-wrap {{ display: flex; align-items: center; justify-content: flex-end; }}
     .stepper {{
       display: flex; align-items: center; gap: 8px; flex-shrink: 0;
       background: var(--cream); border-radius: 999px; padding: 4px;
+      border: 1px solid var(--line);
     }}
     .stepper__btn {{
-      width: 28px; height: 28px; border-radius: 50%; border: none;
-      background: #fff; color: var(--green); font-size: 1.05rem; font-weight: 700;
-      cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,0.08); line-height: 1;
+      width: 32px; height: 32px; border-radius: 50%; border: none;
+      background: #fff; color: var(--green); font-size: 1.15rem; font-weight: 700;
+      cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.1); line-height: 1;
+      display: flex; align-items: center; justify-content: center;
+      touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+    }}
+    .stepper__btn:active {{
+      transform: scale(0.92);
     }}
     .stepper__btn--add {{ background: var(--gold); color: #fff; }}
-    .stepper__qty {{ min-width: 14px; text-align: center; font-weight: 600; font-size: 0.86rem; }}
+    .stepper__qty {{ min-width: 18px; text-align: center; font-weight: 700; font-size: 0.92rem; }}
+    .menu-item {{
+      display: flex; flex-direction: column; gap: 8px;
+      background: #fff; border-radius: 14px; padding: 14px;
+      margin-bottom: 10px; border: 1px solid var(--line);
+      cursor: pointer; transition: transform 0.15s, box-shadow 0.15s;
+      -webkit-tap-highlight-color: transparent;
+    }}
+    .menu-item:active {{
+      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    }}
+    .item-custom-note-wrap {{
+      display: none; width: 100%; margin-top: 2px; padding-top: 8px; border-top: 1px dashed var(--line);
+    }}
+    .item-custom-note-wrap.is-visible {{ display: flex; align-items: center; gap: 6px; }}
+    .item-custom-note-input {{
+      flex: 1; border: 1.5px solid #cbd5e1; border-radius: 8px; padding: 7px 11px;
+      font-size: 0.8rem; font-family: 'Inter', sans-serif; background: #f8fafc; color: var(--ink);
+    }}
+    .item-custom-note-input:focus {{
+      outline: none; border-color: var(--gold); background: #fff; box-shadow: 0 0 0 3px rgba(217,119,6,0.15);
+    }}
 
     .cart-bar {{
       position: fixed; bottom: 0; left: 0; right: 0;
@@ -197,6 +316,7 @@ def _build_guest_menu_html(
       padding: 15px 18px calc(15px + env(safe-area-inset-bottom));
       display: none; align-items: center; justify-content: space-between;
       z-index: 25; cursor: pointer; font-family: 'Inter', sans-serif;
+      box-shadow: 0 -4px 20px rgba(0,0,0,0.18);
     }}
     .cart-bar.is-visible {{ display: flex; }}
     .cart-bar__left {{ font-weight: 600; font-size: 0.92rem; }}
@@ -472,16 +592,50 @@ def _build_guest_menu_html(
       document.getElementById(id).classList.toggle('is-open', open);
     }}
 
+    function updateItemNote(id, val) {{
+      if (!cart[id]) {{
+        const row = document.querySelector('.menu-item[data-id="' + id + '"]');
+        if (!row) return;
+        cart[id] = {{ id, name: row.dataset.name, price: parseFloat(row.dataset.price), qty: 1, notes: '' }};
+      }}
+      cart[id].notes = val;
+      saveCart();
+      const rowInput = document.getElementById('note-' + id);
+      if (rowInput && rowInput.value !== val) rowInput.value = val;
+    }}
+
     function changeQty(id, delta) {{
       const row = document.querySelector('.menu-item[data-id="' + id + '"]');
       if (!row) return;
       const name = row.dataset.name;
       const price = parseFloat(row.dataset.price);
-      if (!cart[id]) cart[id] = {{ id, name, price, qty: 0 }};
+      if (!cart[id]) cart[id] = {{ id, name, price, qty: 0, notes: '' }};
       cart[id].qty = Math.max(0, cart[id].qty + delta);
-      document.getElementById('qty-' + id).textContent = cart[id].qty;
+      const qtyEl = document.getElementById('qty-' + id);
+      if (qtyEl) qtyEl.textContent = cart[id].qty;
+      const addBtn = document.getElementById('add-btn-' + id);
+      const stepper = document.getElementById('stepper-' + id);
+      const wrap = document.getElementById('note-wrap-' + id);
+      if (cart[id].qty > 0) {{
+        if (addBtn) addBtn.style.display = 'none';
+        if (stepper) stepper.style.display = 'flex';
+        if (wrap) wrap.classList.add('is-visible');
+      }} else {{
+        if (addBtn) addBtn.style.display = 'inline-block';
+        if (stepper) stepper.style.display = 'none';
+        if (wrap) wrap.classList.remove('is-visible');
+      }}
       renderCartBar();
       saveCart();
+    }}
+
+    function handleItemCardClick(e, id) {{
+      if (e.target.closest('.stepper-wrap') || e.target.closest('.item-custom-note-wrap')) return;
+      if (!cart[id] || cart[id].qty === 0) {{
+        changeQty(id, 1);
+        const noteInput = document.getElementById('note-' + id);
+        if (noteInput) setTimeout(() => noteInput.focus(), 150);
+      }}
     }}
 
     function cartEntries() {{
@@ -513,10 +667,18 @@ def _build_guest_menu_html(
       let total = 0;
       linesEl.innerHTML = entries.map(i => {{
         total += i.price * i.qty;
+        const noteVal = (i.notes || '').replace(/"/g, '&quot;');
         return '<div class="review-line">'
-          + '<div><div class="review-line__name">' + i.qty + '× ' + i.name + '</div>'
-          + '<div class="review-line__price">₹' + i.price.toFixed(2) + ' each</div></div>'
-          + '<div class="review-line__price">₹' + (i.price * i.qty).toFixed(2) + '</div>'
+          + '<div style="flex:1;min-width:0;">'
+          + '<div class="review-line__name">' + i.qty + '× ' + i.name + '</div>'
+          + '<div class="review-line__price">₹' + i.price.toFixed(2) + ' each</div>'
+          + '<input type="text" class="item-custom-note-input" style="margin-top:6px;width:100%;font-size:0.78rem;" '
+          + 'placeholder="✎ Note (e.g. less spicy, no onion)..." '
+          + 'value="' + noteVal + '" '
+          + 'data-item-id="' + i.id + '" '
+          + 'oninput="updateItemNote(this.dataset.itemId, this.value)" />'
+          + '</div>'
+          + '<div class="review-line__price" style="font-weight:700;font-size:0.92rem;flex-shrink:0;">₹' + (i.price * i.qty).toFixed(2) + '</div>'
           + '</div>';
       }}).join('');
       totalEl.textContent = '₹' + total.toFixed(2);
@@ -598,7 +760,11 @@ def _build_guest_menu_html(
           headers: {{ 'Content-Type': 'application/json' }},
           body: JSON.stringify({{
             tableId: CONFIG.tableId,
-            items: entries.map(i => ({{ menuItemId: i.id, quantity: i.qty }})),
+            items: entries.map(i => ({{
+              menuItemId: i.id,
+              quantity: i.qty,
+              notes: (i.notes || '').trim() || null,
+            }})),
           }}),
         }});
         if (!res.ok) {{
@@ -876,6 +1042,16 @@ def _build_guest_menu_html(
     Object.values(cart).forEach(item => {{
       const el = document.getElementById('qty-' + item.id);
       if (el) el.textContent = item.qty;
+      const addBtn = document.getElementById('add-btn-' + item.id);
+      const stepper = document.getElementById('stepper-' + item.id);
+      const wrap = document.getElementById('note-wrap-' + item.id);
+      if (item.qty > 0) {{
+        if (addBtn) addBtn.style.display = 'none';
+        if (stepper) stepper.style.display = 'flex';
+        if (wrap) wrap.classList.add('is-visible');
+      }}
+      const noteInput = document.getElementById('note-' + item.id);
+      if (noteInput && item.notes) noteInput.value = item.notes;
     }});
     renderCartBar();
 
@@ -987,7 +1163,9 @@ def get_guest_bill(
             key = f"{item.item_name}-{unit_price:.2f}"
             if key not in items_map:
                 items_map[key] = {
+                    "itemName": item.item_name,
                     "name": item.item_name,
+                    "category": getattr(item, "category", None) or "Mains",
                     "unitPrice": unit_price,
                     "quantity": item.quantity,
                     "lineTotal": round(unit_price * item.quantity, 2),
@@ -1004,6 +1182,8 @@ def get_guest_bill(
     is_paid = bill.status == "PAID" if bill else False
 
     return {
+        "id": bill.id if bill else f"bill-{session.id}",
+        "status": bill.status if bill else "OPEN",
         "hasActiveSession": True,
         "tableId": table.id,
         "tableNumber": str(table.number),
@@ -1095,6 +1275,20 @@ def process_guest_payment(
     )
     db.add(payment)
 
+    from app.models import AIEvent
+    from app.socket_manager import emit_sync
+
+    cash_events = db.query(AIEvent).filter(
+        AIEvent.table_id == table.id,
+        AIEvent.event_type == "CASH_PAYMENT_REQUEST",
+        AIEvent.resolved.is_(False),
+    ).all()
+    for ce in cash_events:
+        ce.resolved = True
+        ce.acknowledged = True
+    floor_id = str(table.floor_id) if table and table.floor_id else "floor-1"
+    emit_sync("cash_payment_resolved", {"tableId": table.id}, room=floor_id)
+
     change_table_status(db, table.id, "CLEANING")
     session.status = "PAID"
     db.commit()
@@ -1168,20 +1362,97 @@ def guest_request_cash_payment(
     token: str = Query(...),
     db: Session = Depends(get_db),
 ):
+    from app.socket_manager import emit_sync
+
     qr = _resolve_qr(db, token)
     table = db.get(Table, qr.table_id)
     session = _billing_session(db, qr.table_id)
     bill = get_bill(db, session.id)
     guest_name = session.guest_name if session.guest_name else "A guest"
+    msg = f"{guest_name} at Table {table.number} wants to pay ₹{bill.total:.2f} in cash"
     ai_service.create_alert(
         db,
         AIEventCreate(
             event_type="CASH_PAYMENT_REQUEST",
-            message=f"{guest_name} at Table {table.number} wants to pay ₹{bill.total:.2f} in cash",
+            message=msg,
             table_id=table.id,
+            target_role="WAITER",
         ),
     )
+    floor_id = str(table.floor_id) if table and table.floor_id else "floor-1"
+    emit_sync(
+        "cash_payment_requested",
+        {
+            "tableId": table.id,
+            "tableNumber": table.number,
+            "guestName": guest_name,
+            "amount": float(bill.total),
+            "message": msg,
+        },
+        room=floor_id,
+    )
     return {"ok": True}
+
+
+@router.post("/acknowledge-cash-payment")
+def acknowledge_cash_payment(
+    table_id: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    from app.models import AIEvent
+    from app.socket_manager import emit_sync
+
+    table = db.get(Table, table_id)
+    events = (
+        db.query(AIEvent)
+        .filter(
+            AIEvent.table_id == table_id,
+            AIEvent.event_type == "CASH_PAYMENT_REQUEST",
+            AIEvent.resolved.is_(False),
+        )
+        .all()
+    )
+    for ev in events:
+        ev.acknowledged = True
+    db.commit()
+    floor_id = str(table.floor_id) if table and table.floor_id else "floor-1"
+    emit_sync(
+        "cash_payment_acknowledged",
+        {"tableId": table_id, "status": "ON_IT"},
+        room=floor_id,
+    )
+    return {"ok": True, "acknowledgedCount": len(events)}
+
+
+@router.post("/resolve-cash-payment")
+def resolve_cash_payment(
+    table_id: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    from app.models import AIEvent
+    from app.socket_manager import emit_sync
+
+    table = db.get(Table, table_id)
+    events = (
+        db.query(AIEvent)
+        .filter(
+            AIEvent.table_id == table_id,
+            AIEvent.event_type == "CASH_PAYMENT_REQUEST",
+            AIEvent.resolved.is_(False),
+        )
+        .all()
+    )
+    for ev in events:
+        ev.resolved = True
+        ev.acknowledged = True
+    db.commit()
+    floor_id = str(table.floor_id) if table and table.floor_id else "floor-1"
+    emit_sync(
+        "cash_payment_resolved",
+        {"tableId": table_id},
+        room=floor_id,
+    )
+    return {"ok": True, "resolvedCount": len(events)}
 
 
 @router.post("/request-bill")

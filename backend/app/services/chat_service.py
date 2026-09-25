@@ -1,10 +1,12 @@
-﻿"""AI assistant chat for owners/managers.
+"""AI assistant chat for owners/managers.
 
-Runs a tool-calling agent loop against the local Ollama model. The model sees
-a live snapshot of the floor plus a set of whitelisted tools that map onto the
-same service functions the UI uses ΓÇö so every change the assistant makes goes
-through the normal validation, status machine, history, and socket events.
-When Ollama is unreachable the assistant degrades to deterministic answers
+Runs a tool-calling agent loop against Groq (llama-3.3-70b via OpenAI-
+compatible API).  The model sees a live snapshot of the floor plus a set of
+whitelisted tools that map onto the same service functions the UI uses — so
+every change the assistant makes goes through the normal validation, status
+machine, history, and socket events.
+
+When Groq is unreachable the assistant degrades to deterministic answers
 computed straight from the database.
 """
 
@@ -17,12 +19,11 @@ from collections import deque
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
-import httpx
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.core.status_machine import STATUS_TRANSITIONS, TableStatus
+from app.core.status_machine import VALID_TRANSITIONS
 from app.models import AIEvent, Bill, DiningSession, MenuItem, Order, Reservation, Table
 from app.models.user import User
 from app.schemas.ai import ChatAction
@@ -30,19 +31,20 @@ from app.schemas.menu import MenuItemUpdate
 from app.schemas.reservation import ReservationCreate
 from app.schemas.session import SeatGuestIn
 from app.services import menu_service, reservation_service, session_service, table_service
+from app.services.groq_llm import chat_completion
 
 logger = logging.getLogger(__name__)
 
-MAX_TOOL_ROUNDS = 5
-VALID_STATUSES = list(STATUS_TRANSITIONS.keys())
+MAX_TOOL_ROUNDS = 6
+VALID_STATUSES = list(VALID_TRANSITIONS.keys())
 
 
-# ΓöÇΓöÇΓöÇ helpers ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ——— helpers ————————————————————————————————————————————————————————————————
 
 
 def _find_table(db: Session, table_number: Any) -> Table:
     if table_number is None or str(table_number).strip() == "":
-        raise ValueError("Missing 'table_number' ΓÇö retry the tool call with the table number, e.g. table_number='2'.")
+        raise ValueError("Missing 'table_number' — retry the tool call with the table number, e.g. table_number='2'.")
     raw = str(table_number).strip().lstrip("Tt").strip()
     tables = db.query(Table).all()
     for table in tables:
@@ -102,7 +104,7 @@ def _status_path(current: str, target: str) -> list[str] | None:
     seen = {current}
     while queue:
         state, path = queue.popleft()
-        for nxt in STATUS_TRANSITIONS.get(state, []):
+        for nxt in VALID_TRANSITIONS.get(state, []):
             if nxt in seen:
                 continue
             if nxt == target:
@@ -112,7 +114,7 @@ def _status_path(current: str, target: str) -> list[str] | None:
     return None
 
 
-# ΓöÇΓöÇΓöÇ snapshot (grounding context for every request) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ——— snapshot (grounding context for every request) —————————————————————————
 
 
 def build_snapshot(db: Session) -> str:
@@ -122,7 +124,7 @@ def build_snapshot(db: Session) -> str:
         extra = ""
         session = table_service.active_session_for_table(db, t.id)
         if session:
-            extra = f" ΓÇö {session.guest_name or 'guests'}, party of {session.party_size}"
+            extra = f" — {session.guest_name or 'guests'}, party of {session.party_size}"
         lines.append(f"T{t.number} (seats {t.capacity}, {t.type.lower()}): {t.status}{extra}")
 
     by_status: dict[str, list[str]] = {}
@@ -133,7 +135,7 @@ def build_snapshot(db: Session) -> str:
     free_line = (
         f"AVAILABLE right now: {', '.join(free)} ({len(free)} of {len(tables)})"
         if free
-        else f"AVAILABLE right now: NONE ΓÇö all {len(tables)} tables are taken"
+        else f"AVAILABLE right now: NONE — all {len(tables)} tables are taken"
     )
 
     now = datetime.now(timezone.utc)
@@ -144,14 +146,14 @@ def build_snapshot(db: Session) -> str:
     return (
         f"Time now (UTC): {now.strftime('%Y-%m-%d %H:%M')}\n"
         f"Tables:\n" + "\n".join(lines) + "\n"
-        f"Summary ΓÇö {summary}\n"
+        f"Summary — {summary}\n"
         f"{free_line}\n"
         f"Pending reservations: {pending_res}. Unresolved alerts: {open_alerts}. "
         f"Menu items 86'd (unavailable): {unavailable_items}."
     )
 
 
-# ΓöÇΓöÇΓöÇ tools ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ——— tools ——————————————————————————————————————————————————————————————————
 
 
 def _tool_list_reservations(db: Session, user: User, args: dict) -> dict:
@@ -250,8 +252,8 @@ def _tool_set_table_status(db: Session, user: User, args: dict) -> dict:
         table_service.patch_table_status(db, table.id, step, user.id)
     return {
         "ok": True,
-        "summary": f"T{table.number}: {start} ΓåÆ {target}"
-        + (f" (via {' ΓåÆ '.join(path[:-1])})" if len(path) > 1 else ""),
+        "summary": f"T{table.number}: {start} → {target}"
+        + (f" (via {' → '.join(path[:-1])})" if len(path) > 1 else ""),
     }
 
 
@@ -261,7 +263,7 @@ def _tool_close_table(db: Session, user: User, args: dict) -> dict:
     if not session:
         raise ValueError(f"T{table.number} has no active dining session to close.")
     session_service.close_session(db, session.id, user.id)
-    return {"ok": True, "summary": f"Closed T{table.number}'s session ΓÇö table moved to CLEANING"}
+    return {"ok": True, "summary": f"Closed T{table.number}'s session — table moved to CLEANING"}
 
 
 def _tool_reserve_table(db: Session, user: User, args: dict) -> dict:
@@ -326,7 +328,7 @@ def _tool_set_menu_item(db: Session, user: User, args: dict) -> dict:
         patch["price"] = float(args["price"])
         changes.append(f"price set to {patch['price']:.2f}")
     if not patch:
-        raise ValueError("Nothing to change ΓÇö provide 'available' and/or 'price'.")
+        raise ValueError("Nothing to change — provide 'available' and/or 'price'.")
     menu_service.update_item(db, item.id, MenuItemUpdate(**patch))
     return {"ok": True, "summary": f"{item.name}: {', '.join(changes)}"}
 
@@ -345,12 +347,12 @@ def _tool_send_alert(db: Session, user: User, args: dict) -> dict:
         db,
         AIEventCreate(event_type="WAIT_ALERT", message=message, target_role=role),
     )
-    return {"ok": True, "summary": f"Alert sent to {role.lower()}s: ΓÇ£{message}ΓÇ¥"}
+    return {"ok": True, "summary": f"Alert sent to {role.lower()}s: \"{message}\""}
 
 
 ToolFn = Callable[[Session, User, dict], dict]
 
-# name ΓåÆ (handler, mutates_state, JSON schema for the model)
+# name → (handler, mutates_state, JSON schema for the model)
 TOOLS: dict[str, tuple[ToolFn, bool, dict]] = {
     "list_reservations": (_tool_list_reservations, False, {
         "description": "List reservations with guest, table, time and status.",
@@ -425,7 +427,8 @@ TOOLS: dict[str, tuple[ToolFn, bool, dict]] = {
 }
 
 
-def _ollama_tool_specs() -> list[dict]:
+def _openai_tool_specs() -> list[dict]:
+    """Build OpenAI-format tool specs for the Groq API."""
     return [
         {
             "type": "function",
@@ -435,7 +438,7 @@ def _ollama_tool_specs() -> list[dict]:
     ]
 
 
-# Small local models frequently rename tool arguments ΓÇö map common variants
+# Small local models frequently rename tool arguments — map common variants
 # back onto the canonical parameter names before executing.
 ARG_ALIASES: dict[str, tuple[str, ...]] = {
     "table_number": ("table", "tableNumber", "table_no", "number", "table_id", "tableId"),
@@ -479,7 +482,7 @@ def _execute_tool(db: Session, user: User, name: str, args: dict) -> tuple[dict,
     return result, action
 
 
-# ΓöÇΓöÇΓöÇ deterministic answers (used for accuracy-critical reads + offline mode) ΓöÇΓöÇ
+# ——— deterministic answers (used for accuracy-critical reads + offline mode) ——
 
 
 def _availability_answer(db: Session) -> str:
@@ -490,7 +493,7 @@ def _availability_answer(db: Session) -> str:
         for t in tables:
             busy.setdefault(t.status, []).append(f"T{t.number}")
         detail = "; ".join(f"{status.title()}: {', '.join(nums)}" for status, nums in sorted(busy.items()))
-        return f"No tables are available right now ΓÇö {detail}."
+        return f"No tables are available right now — {detail}."
     listing = ", ".join(f"T{t.number} (seats {t.capacity})" for t in available)
     return f"{len(available)} of {len(tables)} tables available: {listing}."
 
@@ -509,7 +512,7 @@ def _party_fit_answer(db: Session, size: int) -> str:
     )
 
 
-# Read-only availability questions get exact answers computed from the DB ΓÇö
+# Read-only availability questions get exact answers computed from the DB —
 # never trust the LLM to relay table statuses.
 _MUTATION_WORDS = re.compile(
     r"\b(free up|make|set|change|mark|move|reserve|book|seat|assign|cancel|close|clear|update|86)\b"
@@ -527,15 +530,14 @@ def _availability_question(text: str) -> bool:
 
 def _fallback_reply(db: Session, message: str) -> str:
     text = message.lower()
-    offline = " (AI model is offline ΓÇö data-only answer.)"
 
     party_match = re.search(r"(?:party|group|table)\s*(?:of|for)\s*(\d+)|(\d+)\s*(?:people|guests|pax)", text)
     if party_match:
         size = int(party_match.group(1) or party_match.group(2))
-        return _party_fit_answer(db, size) + offline
+        return _party_fit_answer(db, size)
 
     if _AVAILABILITY_WORDS.search(text):
-        return _availability_answer(db) + offline
+        return _availability_answer(db)
 
     tables = db.query(Table).order_by(Table.number).all()
     by_status: dict[str, list[str]] = {}
@@ -543,8 +545,10 @@ def _fallback_reply(db: Session, message: str) -> str:
         by_status.setdefault(t.status, []).append(f"T{t.number}")
     lines = [f"{status.title()}: {', '.join(nums)}" for status, nums in sorted(by_status.items())]
     return (
-        "The AI model is offline (start Ollama and pull the configured model for full chat). "
-        "Current floor snapshot ΓÇö " + "; ".join(lines) + "."
+        "I'm running in offline mode right now (no AI model connected). "
+        "Here's the current floor snapshot — " + "; ".join(lines) + ". "
+        "You can add a Groq API key in your .env file (GROQ_API_KEY=...) to enable "
+        "full conversational AI with natural language commands."
     )
 
 
@@ -559,50 +563,52 @@ def _summarize_actions(actions: list[ChatAction]) -> str:
     return " ".join(parts)
 
 
-def _clean_reply(text: str, actions: list[ChatAction]) -> str:
-    """Small local models sometimes narrate raw tool-call JSON or echo the
-    snapshot; when the reply looks like that, fall back to a deterministic
-    summary of what actually happened."""
-    cleaned = re.sub(r"\{.*?\}", "", text, flags=re.DOTALL)
-    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
-    messy = (
-        not cleaned
-        or len(cleaned) < 8
-        or "\"" in text and ":" in text and "{" in text
-        or cleaned.lower().startswith("time now")
-    )
-    if messy:
-        if actions:
-            return _summarize_actions(actions)
-        return ""
-    return cleaned
+# ——— system prompt ——————————————————————————————————————————————————————————
+
+SYSTEM_PROMPT_TEMPLATE = """\
+You are FOH Assistant — the intelligent AI copilot for a premium restaurant's \
+front-of-house operations. You speak to staff the way a seasoned maitre d' \
+would: warm, professional, concise, and always helpful.
+
+## Your personality
+- Friendly but efficient — like a trusted colleague, not a chatbot
+- Use natural, conversational English — never output raw JSON, code, or markdown tables
+- When reporting data, present it in clean sentences or short lists
+- Always explain *why* you're recommending something, not just what
+- If you make a change, confirm what you did and why it matters
+
+## Who you're speaking to
+You are currently assisting **{user_name}** ({user_role}), who has full authority \
+over floor operations.
+
+## Rules
+1. The LIVE FLOOR SNAPSHOT below is the ONLY source of truth for table statuses. \
+   Never guess, assume, or rely on earlier messages — they may be stale.
+2. Use the provided tools whenever the user asks you to change something \
+   (seat guests, reserve/free tables, close sessions, 86 menu items, change prices, \
+   send staff alerts) or needs data the snapshot doesn't show \
+   (reservation lists, full menu, active sessions, shift stats).
+3. After using a tool, explain what you did in plain language.
+4. If a tool call fails, explain the error in a helpful, non-technical way and \
+   suggest what the user can do instead.
+5. Keep replies to 1–3 sentences for simple questions, up to a short paragraph \
+   for complex ones.
+6. When listing tables, use the format T1, T2, etc.
+
+## Live floor snapshot
+{snapshot}
+"""
 
 
-# ΓöÇΓöÇΓöÇ main entry ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# ——— main entry ——————————————————————————————————————————————————————————————
 
 
 def chat(db: Session, user: User, messages: list[dict]) -> tuple[str, list[ChatAction]]:
-    system_prompt = (
-        "You are FOH Assistant, the AI copilot for a restaurant's front-of-house. "
-        f"You are talking to {user.name} ({user.role.title()}), who has full authority. "
-        "You can answer questions and make changes using the provided tools. "
-        "The live floor snapshot below is the ONLY source of truth for table statuses ΓÇö "
-        "quote it exactly, never guess or assume a table is available, and never rely on "
-        "earlier messages in the conversation for current statuses (they may be stale). "
-        "Use tools when the manager asks you to change something (seat guests, reserve or free tables, "
-        "close sessions, 86 menu items, change prices, send staff alerts) or needs data the snapshot "
-        "lacks (reservation lists, menu, sessions, shift stats). "
-        "Always report what you actually did, including any tool errors. "
-        "Keep replies short, plain English, no JSON, no markdown tables.\n\n"
-        + build_snapshot(db)
+    system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
+        user_name=user.name,
+        user_role=user.role.title(),
+        snapshot=build_snapshot(db),
     )
-
-    convo: list[dict] = [{"role": "system", "content": system_prompt}]
-    for msg in messages[-12:]:
-        role = msg.get("role")
-        content = str(msg.get("content") or "")
-        if role in ("user", "assistant") and content:
-            convo.append({"role": role, "content": content})
 
     last_user_message = next(
         (str(m.get("content") or "") for m in reversed(messages) if m.get("role") == "user"), ""
@@ -613,55 +619,64 @@ def chat(db: Session, user: User, messages: list[dict]) -> tuple[str, list[ChatA
     if _availability_question(last_user_message):
         return _availability_answer(db), []
 
-    url = f"{settings.ollama_base_url.rstrip('/')}/api/chat"
+    # Build the conversation for the LLM
+    convo: list[dict] = [{"role": "system", "content": system_prompt}]
+    for msg in messages[-12:]:
+        role = msg.get("role")
+        content = str(msg.get("content") or "")
+        if role in ("user", "assistant") and content:
+            convo.append({"role": role, "content": content})
+
+    tool_specs = _openai_tool_specs()
     actions: list[ChatAction] = []
 
-    try:
-        with httpx.Client(timeout=60.0) as client:
-            for _round in range(MAX_TOOL_ROUNDS):
-                res = client.post(
-                    url,
-                    json={
-                        "model": settings.ollama_model,
-                        "messages": convo,
-                        "tools": _ollama_tool_specs(),
-                        "stream": False,
-                        "options": {"temperature": 0},
-                    },
-                )
-                res.raise_for_status()
-                reply_msg = res.json().get("message") or {}
-                tool_calls = reply_msg.get("tool_calls") or []
+    for _round in range(MAX_TOOL_ROUNDS):
+        reply_msg = chat_completion(convo, tools=tool_specs, temperature=0.1)
 
-                if not tool_calls:
-                    content = _clean_reply((reply_msg.get("content") or "").strip(), actions)
-                    if content:
-                        return content, actions
-                    break
+        # If Groq is unavailable, fall back to deterministic answers
+        if reply_msg is None:
+            return _fallback_reply(db, last_user_message), actions
 
-                convo.append(reply_msg)
-                for call in tool_calls:
-                    fn = (call.get("function") or {})
-                    name = fn.get("name") or ""
-                    raw_args = fn.get("arguments") or {}
-                    if isinstance(raw_args, str):
-                        try:
-                            raw_args = json.loads(raw_args)
-                        except json.JSONDecodeError:
-                            raw_args = {}
-                    if name not in TOOLS:
-                        result: dict = {"error": f"Unknown tool '{name}'"}
-                        action = None
-                    else:
-                        result, action = _execute_tool(db, user, name, raw_args)
-                    if action:
-                        actions.append(action)
-                    convo.append({"role": "tool", "tool_name": name, "content": json.dumps(result)})
+        tool_calls = reply_msg.get("tool_calls") or []
 
-            # Ran out of rounds or empty reply ΓÇö summarize what happened.
+        if not tool_calls:
+            # Model gave a final text response
+            content = (reply_msg.get("content") or "").strip()
+            if content:
+                return content, actions
+            # Empty content — summarize whatever tools did
             if actions:
                 return _summarize_actions(actions), actions
             return _fallback_reply(db, last_user_message), actions
-    except (httpx.HTTPError, OSError) as exc:
-        logger.info("Ollama chat unavailable (%s) ΓÇö using deterministic fallback", exc)
-        return _fallback_reply(db, last_user_message), actions
+
+        # Process tool calls
+        convo.append(reply_msg)
+        for call in tool_calls:
+            fn_info = call.get("function") or {}
+            name = fn_info.get("name") or ""
+            raw_args = fn_info.get("arguments") or "{}"
+            if isinstance(raw_args, str):
+                try:
+                    raw_args = json.loads(raw_args)
+                except json.JSONDecodeError:
+                    raw_args = {}
+
+            if name not in TOOLS:
+                result: dict = {"error": f"Unknown tool '{name}'"}
+                action = None
+            else:
+                result, action = _execute_tool(db, user, name, raw_args)
+            if action:
+                actions.append(action)
+
+            # OpenAI-compatible format requires tool_call_id
+            convo.append({
+                "role": "tool",
+                "tool_call_id": call.get("id", ""),
+                "content": json.dumps(result),
+            })
+
+    # Exhausted tool rounds
+    if actions:
+        return _summarize_actions(actions), actions
+    return _fallback_reply(db, last_user_message), actions

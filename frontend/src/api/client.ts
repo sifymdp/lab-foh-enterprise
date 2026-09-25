@@ -132,6 +132,9 @@ export function normalizeKitchenOrder(order: Record<string, unknown>): KitchenOr
             quantity: Number(value.quantity ?? 0),
             unit_price: Number(value.unit_price ?? value.unitPrice ?? 0),
             station: (value.station ?? null) as string | null,
+            notes: (value.notes ?? null) as string | null,
+            allergy_flag: Boolean(value.allergy_flag ?? value.allergyFlag ?? false),
+            item_status: (value.item_status ?? value.itemStatus ?? 'RECEIVED') as string,
           }
         })
       : [],

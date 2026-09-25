@@ -70,12 +70,24 @@ function ElapsedTimer({ order }: { order: KitchenOrder }) {
 
 interface OrderCardProps {
   order: KitchenOrder
+  selectedStation: KitchenStation
   onCardClick: (order: KitchenOrder) => void
   onQuickAction: (orderId: string, nextStatus: string) => void
   busy: boolean
 }
 
-function OrderCard({ order, onCardClick, onQuickAction, busy }: OrderCardProps) {
+function getStationTagClass(st?: string | null): string {
+  if (!st) return 'station-tag--main'
+  const s = st.toUpperCase()
+  if (s.includes('GRILL')) return 'station-tag--grill'
+  if (s.includes('FRY')) return 'station-tag--fry'
+  if (s.includes('PIZZA')) return 'station-tag--pizza'
+  if (s.includes('BAR')) return 'station-tag--bar'
+  if (s.includes('DESSERT')) return 'station-tag--dessert'
+  return 'station-tag--main'
+}
+
+function OrderCard({ order, selectedStation, onCardClick, onQuickAction, busy }: OrderCardProps) {
   const cfg = STATUS_CONFIG[order.status] ?? STATUS_CONFIG.RECEIVED
   const next = NEXT_ACTION[order.status]
   const srcKey = (order.source || 'WAITER').toUpperCase()
@@ -113,15 +125,56 @@ function OrderCard({ order, onCardClick, onQuickAction, busy }: OrderCardProps) 
 
       <div className="kds-order-card__body">
         <div className="kds-order-card__item-list">
-          {items.map((item: any, idx: number) => (
-            <div key={item.id || idx} className="kds-order-card__item-row">
-              <span className="kds-order-card__item-qty">{item.quantity}×</span>
-              <span className="kds-order-card__item-name">{item.item_name}</span>
-              {item.station && (
-                <span className="kds-order-card__station-tag">{item.station}</span>
-              )}
-            </div>
-          ))}
+          {items.map((item: any, idx: number) => {
+            const itemStation = (item.station || 'MAIN KITCHEN').toUpperCase()
+            const isStationMatch =
+              selectedStation !== 'ALL' &&
+              (selectedStation === 'MAIN KITCHEN'
+                ? itemStation === 'MAIN KITCHEN' || !item.station
+                : itemStation === selectedStation.toUpperCase())
+            const isOtherStation = selectedStation !== 'ALL' && !isStationMatch
+
+            return (
+              <div
+                key={item.id || idx}
+                className={`kds-order-card__item-row ${
+                  isStationMatch
+                    ? 'kds-order-card__item-row--station-match'
+                    : isOtherStation
+                    ? 'kds-order-card__item-row--other-station'
+                    : ''
+                }`}
+              >
+                <div className="kds-order-card__item-main">
+                  <span className="kds-order-card__item-qty">{item.quantity}×</span>
+                  <span className="kds-order-card__item-name">{item.item_name}</span>
+                  {isStationMatch && (
+                    <span className="kds-order-card__prep-badge">🔥 Prep</span>
+                  )}
+                  <span
+                    className={`kds-order-card__station-tag ${getStationTagClass(item.station)}`}
+                  >
+                    {item.station || 'MAIN KITCHEN'}
+                  </span>
+                </div>
+
+                {/* Preparation Note from customer/staff */}
+                {item.notes && (
+                  <div className="kds-order-card__item-notes">
+                    <span>📝</span>
+                    <span><strong>Note:</strong> {item.notes}</span>
+                  </div>
+                )}
+
+                {/* Allergy Flag Alert */}
+                {item.allergy_flag && (
+                  <div className="kds-order-card__allergy-badge">
+                    <span>⚠️ Allergen Alert</span>
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       </div>
 
@@ -235,13 +288,18 @@ export function KitchenPage() {
   }
 
   // Filter orders by station if selected
-  const filteredOrders = station === 'ALL'
-    ? orders
-    : orders.filter((order) =>
-        (order.items || []).some(
-          (item: any) => item.station === station || !item.station,
-        ),
-      )
+  const filteredOrders =
+    station === 'ALL'
+      ? orders
+      : orders.filter((order) =>
+          (order.items || []).some((item: any) => {
+            const itemStation = (item.station || 'MAIN KITCHEN').toUpperCase()
+            if (station === 'MAIN KITCHEN') {
+              return itemStation === 'MAIN KITCHEN' || !item.station
+            }
+            return itemStation === station.toUpperCase()
+          }),
+        )
 
   const receivingCount = orders.filter((o) => o.status === 'RECEIVED').length
   const preparingCount = orders.filter((o) => o.status === 'PREPARING').length
@@ -288,47 +346,55 @@ export function KitchenPage() {
         </div>
       )}
 
-      {/* Station Filter Bar */}
-      <div className="kds-station-filter-container">
-        <StationFilter selectedStation={station} onStationChange={setStation} />
-      </div>
+      {/* Main Kitchen Workspace: Vertical Station Sidebar + Orders Area */}
+      <div className="kds-main-layout">
+        <aside className="kds-station-sidebar">
+          <StationFilter
+            selectedStation={station}
+            onStationChange={setStation}
+            orders={orders}
+            layout="vertical"
+          />
+        </aside>
 
-      {/* Content Area */}
-      <main className="kds-content-area">
-        {loading ? (
-          <div className="kds-loading-box">
-            <div className="spinner" />
-            <p>Syncing kitchen line orders…</p>
-          </div>
-        ) : error ? (
-          <div className="kds-error-box">
-            <p className="form-error">⚠️ {error}</p>
-            <button type="button" className="btn btn-secondary btn-sm" onClick={() => loadOrders()}>
-              Retry
-            </button>
-          </div>
-        ) : filteredOrders.length === 0 ? (
-          <div className="kds-empty-box">
-            <div className="kds-empty-icon">🍽️</div>
-            <h3>Kitchen Line Clear!</h3>
-            <p className="muted">
-              No pending orders{station !== 'ALL' ? ` at station "${station}"` : ''}. All dishes served.
-            </p>
-          </div>
-        ) : (
-          <div className="kds-cards-grid">
-            {filteredOrders.map((order) => (
-              <OrderCard
-                key={order.id}
-                order={order}
-                onCardClick={setSelectedOrder}
-                onQuickAction={handleStatusChange}
-                busy={busyIds.has(order.id)}
-              />
-            ))}
-          </div>
-        )}
-      </main>
+        {/* Content Area */}
+        <main className="kds-content-area">
+          {loading ? (
+            <div className="kds-loading-box">
+              <div className="spinner" />
+              <p>Syncing kitchen line orders…</p>
+            </div>
+          ) : error ? (
+            <div className="kds-error-box">
+              <p className="form-error">⚠️ {error}</p>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => loadOrders()}>
+                Retry
+              </button>
+            </div>
+          ) : filteredOrders.length === 0 ? (
+            <div className="kds-empty-box">
+              <div className="kds-empty-icon">🍽️</div>
+              <h3>Kitchen Line Clear!</h3>
+              <p className="muted">
+                No pending orders{station !== 'ALL' ? ` at station "${station}"` : ''}. All dishes served.
+              </p>
+            </div>
+          ) : (
+            <div className="kds-cards-grid">
+              {filteredOrders.map((order) => (
+                <OrderCard
+                  key={order.id}
+                  order={order}
+                  selectedStation={station}
+                  onCardClick={setSelectedOrder}
+                  onQuickAction={handleStatusChange}
+                  busy={busyIds.has(order.id)}
+                />
+              ))}
+            </div>
+          )}
+        </main>
+      </div>
 
       {/* Order Detail Modal */}
       {selectedOrder && (

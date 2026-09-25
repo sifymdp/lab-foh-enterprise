@@ -499,6 +499,18 @@ def process_payment(
             session.closed_at = now
             table = db.get(Table, session.table_id)
             if table:
+                # Resolve any pending cash payment alerts for this table
+                from app.models import AIEvent
+                cash_events = db.query(AIEvent).filter(
+                    AIEvent.table_id == table.id,
+                    AIEvent.event_type == "CASH_PAYMENT_REQUEST",
+                    AIEvent.resolved.is_(False),
+                ).all()
+                for ce in cash_events:
+                    ce.resolved = True
+                    ce.acknowledged = True
+                emit_sync("cash_payment_resolved", {"tableId": table.id}, room=str(table.floor_id))
+
                 old_status = table.status
                 table.status = "CLEANING"
                 record_history(db, table.id, old_status, "CLEANING", user_id, session.id)

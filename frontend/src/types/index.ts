@@ -249,6 +249,7 @@ export interface DiningSession {
   partySize: number
   seatedAt: string
   status: TableStatus
+  closedAt?: string | null
 }
 
 export interface Floor {

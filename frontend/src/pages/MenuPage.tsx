@@ -89,6 +89,42 @@ function getDietaryType(item: MenuItem): 'veg' | 'non-veg' | 'liquor' {
   return 'veg'
 }
 
+function getAllergenTags(item: MenuItem): Array<{ label: string; color: string; bg: string }> {
+  const text = `${item.name} ${item.description || ''}`.toLowerCase()
+  const badges: Array<{ label: string; color: string; bg: string }> = []
+  const isLiquor = item.category === 'Liquor & Cocktails'
+  const nonVegKeywords = ['chicken', 'mutton', 'prawn', 'prawns', 'fish', 'sea bass', 'lamb', 'steak', 'meat', 'calamari', 'duck', 'egg']
+  const isNonVeg = nonVegKeywords.some((k) => text.includes(k))
+  const dairyKeywords = ['ghee', 'butter', 'paneer', 'cream', 'rabri', 'gelato', 'tiramisu', 'mascarpone', 'burrata', 'parmigiano', 'cheese']
+  const hasDairy = dairyKeywords.some((k) => text.includes(k))
+
+  if (!isLiquor && !isNonVeg) {
+    if (!hasDairy) {
+      badges.push({ label: 'Vegan', color: '#15803d', bg: '#dcfce7' })
+    } else {
+      badges.push({ label: 'Vegetarian', color: '#166534', bg: '#f0fdf4' })
+    }
+  }
+
+  const glutenKeywords = ['roast', 'parotta', 'parottas', 'naan', 'noodles', 'dim sum', 'dumplings', 'sourdough', 'pasta', 'fettuccine', 'brioche', 'ladyfingers', 'beer', 'crusted']
+  if (!isLiquor && !glutenKeywords.some((k) => text.includes(k))) {
+    badges.push({ label: 'Gluten-Free', color: '#0369a1', bg: '#e0f2fe' })
+  }
+
+  if (!isLiquor && !hasDairy) {
+    badges.push({ label: 'Dairy-Free', color: '#7c3aed', bg: '#f3e8ff' })
+  }
+
+  const nutKeywords = ['cashew', 'cashews', 'pistachio', 'almond', 'walnut', 'peanut']
+  if (nutKeywords.some((k) => text.includes(k))) {
+    badges.push({ label: 'Contains Nuts', color: '#b45309', bg: '#fef3c7' })
+  } else if (!isLiquor) {
+    badges.push({ label: 'Nut-Free', color: '#0f766e', bg: '#ccfbf1' })
+  }
+
+  return badges
+}
+
 export function MenuPage() {
   const [items, setItems] = useState<MenuItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -623,6 +659,7 @@ export function MenuPage() {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1.15rem' }}>
                 {catItems.map((item) => {
                   const dType = getDietaryType(item)
+                  const allergens = getAllergenTags(item)
 
                   return (
                     <div key={item.id} className={`dish-card-luxury ${!item.available ? 'unavailable' : ''}`}>
@@ -678,6 +715,28 @@ export function MenuPage() {
                         }}>
                           {item.description || 'Artisan preparation crafted with premium culinary ingredients.'}
                         </p>
+
+                        {/* Allergen & Dietary Tags */}
+                        {allergens.length > 0 && (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '0.5rem', marginBottom: '0.25rem' }}>
+                            {allergens.map((a) => (
+                              <span
+                                key={a.label}
+                                style={{
+                                  fontSize: '0.65rem',
+                                  fontWeight: 700,
+                                  padding: '1px 6px',
+                                  borderRadius: '999px',
+                                  color: a.color,
+                                  background: a.bg,
+                                  letterSpacing: '0.02em',
+                                }}
+                              >
+                                {a.label}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </div>
 
                       {/* Card Footer: Price & Actions */}
@@ -757,6 +816,7 @@ export function MenuPage() {
                   <tbody>
                     {catItems.map((item, idx) => {
                       const dType = getDietaryType(item)
+                      const allergens = getAllergenTags(item)
                       const isLast = idx === catItems.length - 1
 
                       return (
@@ -768,6 +828,25 @@ export function MenuPage() {
                             <strong style={{ fontSize: '0.9rem', color: 'var(--text)' }}>{item.name}</strong>
                             {item.description && (
                               <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '2px' }}>{item.description}</div>
+                            )}
+                            {allergens.length > 0 && (
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px' }}>
+                                {allergens.map((a) => (
+                                  <span
+                                    key={a.label}
+                                    style={{
+                                      fontSize: '0.62rem',
+                                      fontWeight: 700,
+                                      padding: '1px 5px',
+                                      borderRadius: '4px',
+                                      color: a.color,
+                                      background: a.bg,
+                                    }}
+                                  >
+                                    {a.label}
+                                  </span>
+                                ))}
+                              </div>
                             )}
                           </td>
                           <td style={{ padding: '12px 16px', color: cuisineInfo.themeColor, fontWeight: 600 }}>

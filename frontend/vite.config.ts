@@ -28,6 +28,12 @@ export default defineConfig({
       '/insights': 'http://127.0.0.1:8000',
       '/vision': 'http://127.0.0.1:8000',
       '/health': 'http://127.0.0.1:8000',
+      '/ai': 'http://127.0.0.1:8000',
+      '/customer': 'http://127.0.0.1:8000',
+      '/ai-booking': 'http://127.0.0.1:8000',
+      '/ai-timeslot': 'http://127.0.0.1:8000',
+      '/ai-waitlist': 'http://127.0.0.1:8000',
+      '/voice': 'http://127.0.0.1:8000',
     },
   },
 })

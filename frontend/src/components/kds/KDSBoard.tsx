@@ -12,11 +12,18 @@ export function KDSBoard({ orders, selectedStation, onStatusChange }: KDSBoardPr
   const [allExpanded, setAllExpanded] = useState<boolean | undefined>(undefined)
 
   // Filter orders by station if not "ALL"
-  const filteredOrders = selectedStation === 'ALL'
-    ? orders
-    : orders.filter((order) =>
-        (order.items || []).some((item: any) => item.station === selectedStation || !item.station)
-      )
+  const filteredOrders =
+    selectedStation === 'ALL'
+      ? orders
+      : orders.filter((order) =>
+          (order.items || []).some((item: any) => {
+            const itemStation = (item.station || 'MAIN KITCHEN').toUpperCase()
+            if (selectedStation === 'MAIN KITCHEN') {
+              return itemStation === 'MAIN KITCHEN' || !item.station
+            }
+            return itemStation === selectedStation.toUpperCase()
+          })
+        )
 
   // Split orders into 3 columns by status
   const received = filteredOrders.filter((o) => o.status === 'RECEIVED')

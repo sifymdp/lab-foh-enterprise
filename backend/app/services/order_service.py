@@ -74,10 +74,14 @@ def list_orders(
         q = q.filter(Order.tenant_id == tenant_id)
     if branch_id:
         q = q.filter(Order.branch_id == branch_id)
-    if table_id:
-        q = q.filter(Order.table_id == table_id)
     if session_id:
         q = q.filter(Order.session_id == session_id)
+    elif table_id:
+        active_sess = active_session_for_table(db, table_id)
+        if active_sess:
+            q = q.filter(Order.session_id == active_sess.id)
+        else:
+            q = q.filter(Order.table_id == table_id)
     rows = q.order_by(Order.placed_at.desc()).all()
     return [_order_to_out(o) for o in rows]
 
@@ -156,6 +160,7 @@ def create_order(
                 item_name=menu_item.name,
                 unit_price=float(menu_item.price),
                 quantity=line.quantity,
+                notes=getattr(line, "notes", None),
             )
         )
 

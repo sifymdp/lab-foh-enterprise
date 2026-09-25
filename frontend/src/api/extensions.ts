@@ -78,7 +78,7 @@ export const menuApi = {
 
 // ─── Orders ──────────────────────────────────────────────────────────────────
 
-export interface OrderItem { id: string; itemName: string; category?: string; unitPrice: number; quantity: number }
+export interface OrderItem { id: string; itemName: string; category?: string; unitPrice: number; quantity: number; notes?: string | null }
 export interface Order {
   id: string; sessionId: string; tableId: string
   tableNumber?: string | null

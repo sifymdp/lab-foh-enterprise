@@ -14,6 +14,9 @@ export function OrderCard({ order, onStatusChange }: OrderCardProps) {
   const itemsPreviewText = (order.items || []).map((i: any) => `${i.quantity}x ${i.item_name}`).join(', ')
   const totalItemCount = (order.items || []).reduce((sum: number, i: any) => sum + i.quantity, 0)
 
+  const hasNotes = (order.items || []).some((i: any) => Boolean(i.notes))
+  const hasAllergy = (order.items || []).some((i: any) => Boolean(i.allergy_flag))
+
   // Determine status button text
   let actionLabel = ''
   if (order.status === 'RECEIVED') actionLabel = 'START PREPARING'
@@ -37,6 +40,16 @@ export function OrderCard({ order, onStatusChange }: OrderCardProps) {
           </div>
 
           <div className="card-strip__right">
+            {hasNotes && (
+              <span className="card-strip__mini-tag card-strip__mini-tag--note" title="Order has custom preparation notes">
+                📝 Notes
+              </span>
+            )}
+            {hasAllergy && (
+              <span className="card-strip__mini-tag card-strip__mini-tag--allergy" title="Customer has allergen warning">
+                ⚠️ Allergy
+              </span>
+            )}
             <button
               type="button"
               className="card-strip__slide-btn"

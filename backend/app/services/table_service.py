@@ -146,7 +146,7 @@ def patch_table_status(
             table_id=table.id,
             tenant_id=table.tenant_id,
             branch_id=table.branch_id,
-            created_by=user_id,
+            host_id=user_id,
             guest_name=f"Guest Table {table.number}",
             party_size=table.capacity or 2,
             status=new_status,

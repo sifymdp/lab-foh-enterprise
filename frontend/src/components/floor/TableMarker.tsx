@@ -17,6 +17,7 @@ interface TableMarkerProps {
   reservation?: TableReservationInfo
   hasWaiterCall?: boolean
   waiterCallState?: 'CALLING' | 'ON_IT' | boolean
+  cashCallState?: 'CALLING' | 'ON_IT' | boolean
   isHighlighted?: boolean
   isDimmed?: boolean
   pendingOrdersCount?: number
@@ -32,6 +33,7 @@ export function TableMarker({
   reservation,
   hasWaiterCall,
   waiterCallState,
+  cashCallState,
   isHighlighted,
   isDimmed,
   pendingOrdersCount,
@@ -52,6 +54,8 @@ export function TableMarker({
 
   const isCalling = waiterCallState === 'CALLING' || (waiterCallState === true && hasWaiterCall) || (hasWaiterCall && !waiterCallState)
   const isOnIt = waiterCallState === 'ON_IT'
+  const isCashCalling = cashCallState === 'CALLING' || cashCallState === true
+  const isCashOnIt = cashCallState === 'ON_IT'
 
   const rect = { x: live.x, y: live.y, width: live.width, height: live.height }
 
@@ -83,6 +87,8 @@ export function TableMarker({
         dragging ? 'table-marker--dragging' : '',
         isCalling ? 'table-marker--waiter-calling' : '',
         isOnIt ? 'table-marker--waiter-on-it' : '',
+        isCashCalling ? 'table-marker--cash-calling' : '',
+        isCashOnIt ? 'table-marker--cash-on-it' : '',
         isHighlighted ? 'table-marker--highlighted' : '',
         isDimmed ? 'table-marker--dimmed' : '',
       ]
@@ -196,6 +202,58 @@ export function TableMarker({
           title="Staff is on the way / attending"
         >
           🏃 ON THE WAY
+        </span>
+      )}
+      {isCashCalling && (
+        <span
+          className="table-marker__waiter-call"
+          style={{
+            position: 'absolute',
+            top: -12,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: '#10b981',
+            color: '#ffffff',
+            fontSize: '10px',
+            fontWeight: 800,
+            padding: '2px 9px',
+            borderRadius: '999px',
+            boxShadow: '0 2px 10px rgba(16, 185, 129, 0.85)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            zIndex: 22,
+            whiteSpace: 'nowrap',
+          }}
+          title="Customer requested cash payment - BLINKING"
+        >
+          💵 CASH PAYMENT
+        </span>
+      )}
+      {isCashOnIt && (
+        <span
+          className="table-marker__waiter-call"
+          style={{
+            position: 'absolute',
+            top: -12,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: '#0284c7',
+            color: '#ffffff',
+            fontSize: '10px',
+            fontWeight: 800,
+            padding: '2px 9px',
+            borderRadius: '999px',
+            boxShadow: '0 2px 8px rgba(2, 132, 199, 0.7)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            zIndex: 22,
+            whiteSpace: 'nowrap',
+          }}
+          title="Staff is collecting cash payment"
+        >
+          🏃 COLLECTING CASH
         </span>
       )}
       {Boolean(pendingOrdersCount && pendingOrdersCount > 0) && (

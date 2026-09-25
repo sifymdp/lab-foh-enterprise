@@ -121,15 +121,26 @@ export function OrderDetailModal({ order, onClose, onStatusChange, busy }: Order
 
         {/* Items List */}
         <div className="odm-items">
-          <div className="odm-items-title">Order Items</div>
-          {(order.items || []).map((item: any) => (
-            <div key={item.id} className="odm-item-row">
-              <span className="odm-item-qty">{item.quantity}x</span>
-              <span className="odm-item-name">{item.item_name}</span>
-              {item.station && (
+          <div className="odm-items-title">Order Items & Preparation</div>
+          {(order.items || []).map((item: any, idx: number) => (
+            <div key={item.id || idx} className="odm-item-row">
+              <div className="odm-item-main">
+                <span className="odm-item-qty">{item.quantity}×</span>
+                <span className="odm-item-name">{item.item_name}</span>
                 <span className={`odm-item-station ${getStationBadgeClass(item.station)}`}>
-                  {formatStationName(item.station)}
+                  {formatStationName(item.station) || 'MAIN KITCHEN'}
                 </span>
+              </div>
+              {item.notes && (
+                <div className="odm-item-notes">
+                  <span>📝</span>
+                  <span><strong>Note:</strong> {item.notes}</span>
+                </div>
+              )}
+              {item.allergy_flag && (
+                <div className="odm-item-allergy">
+                  <span>⚠️ Allergen Alert</span>
+                </div>
               )}
             </div>
           ))}

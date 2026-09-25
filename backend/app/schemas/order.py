@@ -4,6 +4,7 @@ from app.schemas.common import CamelModel
 class OrderItemIn(CamelModel):
     menu_item_id: str
     quantity: int = 1
+    notes: str | None = None
 
 
 class OrderCreate(CamelModel):

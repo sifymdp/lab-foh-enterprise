@@ -87,7 +87,7 @@ export function KDSPage() {
         <div className="kds-top-bar__left">
           <div className="kds-title-group">
             <h2>⚡ High-Density KDS Board</h2>
-            <span className="kds-view-pill">Kanban Staging</span>
+            <span className="kds-view-pill">Order Staging</span>
           </div>
           <p className="muted">Multi-column live order lifecycle & AI workload management</p>
         </div>
@@ -128,7 +128,6 @@ export function KDSPage() {
             selectedStation="ALL"
             onStatusChange={handleStatusChange}
           />
-
           {/* Completed Orders (Collapsed by default) */}
           <CompletedOrdersPanel orders={orders} />
         </>

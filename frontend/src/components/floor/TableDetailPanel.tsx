@@ -17,23 +17,28 @@ interface TableDetailPanelProps {
   table: Table
   hasWaiterCall?: boolean
   waiterCallState?: 'CALLING' | 'ON_IT' | boolean
+  hasCashCall?: boolean
+  cashCallState?: 'CALLING' | 'ON_IT' | boolean
+  cashCallInfo?: { guestName?: string; amount?: number; message?: string }
   reservation?: { id: string; guestName: string; partySize: number; reservedFor: string }
   onDismissWaiterCall?: () => void
   onOnItWaiterCall?: () => void
   onResolveWaiterCall?: () => void
+  onOnItCashCall?: () => void
+  onResolveCashCall?: () => void
   onClose: () => void
   onSeatGuests: () => void
   onTakeOrder?: () => void
 }
 
 function aggregateItems(orders: Order[]) {
-  const map = new Map<string, { name: string; price: number; qty: number }>()
+  const map = new Map<string, { name: string; price: number; qty: number; notes?: string }>()
   for (const order of orders) {
     for (const item of order.items) {
-      const key = `${item.itemName}-${item.unitPrice}`
+      const key = `${item.itemName}-${item.unitPrice}-${item.notes || ''}`
       const existing = map.get(key)
       if (existing) existing.qty += item.quantity
-      else map.set(key, { name: item.itemName, price: item.unitPrice, qty: item.quantity })
+      else map.set(key, { name: item.itemName, price: item.unitPrice, qty: item.quantity, notes: item.notes || undefined })
     }
   }
   return [...map.values()]
@@ -44,10 +49,15 @@ export function TableDetailPanel({
   table,
   hasWaiterCall,
   waiterCallState,
+  hasCashCall,
+  cashCallState,
+  cashCallInfo,
   reservation,
   onDismissWaiterCall,
   onOnItWaiterCall,
   onResolveWaiterCall,
+  onOnItCashCall,
+  onResolveCashCall,
   onClose,
   onSeatGuests,
   onTakeOrder,
@@ -66,13 +76,16 @@ export function TableDetailPanel({
   const [confirmPaid, setConfirmPaid] = useState(false)
   const [billingLoading, setBillingLoading] = useState(false)
 
-  const session = sessions
-    .filter(
-      (s) =>
-        (s.tableId === table.id || (s as any).table_id === table.id) &&
-        ['SEATED', 'ACTIVE', 'BILLING', 'PAID'].includes(s.status),
-    )
-    .sort((a, b) => new Date(b.seatedAt).getTime() - new Date(a.seatedAt).getTime())[0]
+  const session = ['AVAILABLE', 'CLEANING', 'MAINTENANCE'].includes(table.status)
+    ? null
+    : sessions
+        .filter(
+          (s) =>
+            (s.tableId === table.id || (s as any).table_id === table.id) &&
+            !s.closedAt &&
+            ['SEATED', 'ACTIVE', 'BILLING'].includes(s.status),
+        )
+        .sort((a, b) => new Date(b.seatedAt).getTime() - new Date(a.seatedAt).getTime())[0] || null
   const section = floor.sections.find((s) => s.id === table.sectionId)
   const editable = user ? canEditFloor(user.role) : false
   const canSeat = user ? canSeatGuests(user.role) : false
@@ -80,13 +93,18 @@ export function TableDetailPanel({
 
   useEffect(() => {
     let cancelled = false
+    if (!session?.id) {
+      setOrders([])
+      setOrdersLoading(false)
+      return
+    }
     setOrdersLoading(true)
-    ordersApi.list({ tableId: table.id })
+    ordersApi.list({ sessionId: session.id })
       .then((data) => { if (!cancelled) setOrders(data) })
       .catch(() => { if (!cancelled) setOrders([]) })
       .finally(() => { if (!cancelled) setOrdersLoading(false) })
     return () => { cancelled = true }
-  }, [table.id])
+  }, [table.id, session?.id])
 
   // Fetch or sync real live bill for this table session
   useEffect(() => {
@@ -165,8 +183,9 @@ export function TableDetailPanel({
         }
         ordersApi.list({ tableId: table.id }).then(setOrders).catch(() => {})
       }
-    } catch (e) {
-      setStatusError(e instanceof Error ? e.message : 'Status update failed')
+    } catch (e: any) {
+      const msg = e?.message || 'Status update failed'
+      setStatusError(typeof msg === 'string' ? msg : 'Status update failed. Please try again.')
     } finally {
       setStatusLoading(false)
     }
@@ -305,19 +324,19 @@ export function TableDetailPanel({
           background: waiterCallState === 'ON_IT' ? '#fffbeb' : '#fef2f2',
           border: `1.5px solid ${waiterCallState === 'ON_IT' ? '#f59e0b' : '#f87171'}`,
           borderRadius: '10px',
-          padding: '10px 12px',
+          padding: '12px 14px',
           margin: '10px 0',
-          boxShadow: waiterCallState === 'ON_IT' ? '0 2px 8px rgba(245,158,11,0.15)' : '0 2px 8px rgba(239,68,68,0.2)',
+          boxShadow: waiterCallState === 'ON_IT' ? '0 2px 8px rgba(245,158,11,0.2)' : '0 2px 8px rgba(239,68,68,0.25)',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '1.3rem' }}>{waiterCallState === 'ON_IT' ? '🏃' : '🔔'}</span>
+              <span style={{ fontSize: '1.3rem' }}>{waiterCallState === 'ON_IT' ? '🏃' : '🙋'}</span>
               <div>
-                <strong style={{ color: waiterCallState === 'ON_IT' ? '#b45309' : '#dc2626', fontSize: '0.85rem', display: 'block' }}>
-                  {waiterCallState === 'ON_IT' ? 'Waiter Attending Table' : 'Waiter Called!'}
+                <strong style={{ color: waiterCallState === 'ON_IT' ? '#b45309' : '#dc2626', fontSize: '0.85rem', display: 'block', textTransform: 'uppercase' }}>
+                  {waiterCallState === 'ON_IT' ? `Staff Attending Table ${table.number}` : `A Guest at Table ${table.number} Needs Help`}
                 </strong>
                 <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
-                  {waiterCallState === 'ON_IT' ? 'Staff is on the way / assisting' : 'Customer requested assistance'}
+                  {waiterCallState === 'ON_IT' ? 'Staff is on the way / assisting table' : 'Customer requested assistance'}
                 </span>
               </div>
             </div>
@@ -336,54 +355,175 @@ export function TableDetailPanel({
           </div>
 
           <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
-            {waiterCallState !== 'ON_IT' && onOnItWaiterCall && (
-              <button
-                type="button"
-                className="btn btn-sm"
-                style={{
-                  flex: 1,
-                  background: '#f59e0b',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: '6px',
-                  fontWeight: 700,
-                  padding: '6px 12px',
-                  cursor: 'pointer',
-                  fontSize: '0.8rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '4px',
-                  boxShadow: '0 2px 4px rgba(245,158,11,0.3)',
-                }}
-                onClick={onOnItWaiterCall}
-              >
-                🏃 On It
-              </button>
+            {waiterCallState !== 'ON_IT' ? (
+              onOnItWaiterCall && (
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  style={{
+                    flex: 1,
+                    background: '#f59e0b',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontWeight: 700,
+                    padding: '8px 12px',
+                    cursor: 'pointer',
+                    fontSize: '0.82rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                    boxShadow: '0 2px 4px rgba(245,158,11,0.3)',
+                  }}
+                  onClick={onOnItWaiterCall}
+                >
+                  🏃 I'm on it
+                </button>
+              )
+            ) : (
+              (onResolveWaiterCall || onDismissWaiterCall) && (
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  style={{
+                    flex: 1,
+                    background: '#ffffff',
+                    color: '#16a34a',
+                    border: '1.5px solid #16a34a',
+                    borderRadius: '8px',
+                    fontWeight: 700,
+                    padding: '8px 12px',
+                    cursor: 'pointer',
+                    fontSize: '0.82rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+                  }}
+                  onClick={onResolveWaiterCall || onDismissWaiterCall}
+                >
+                  ✓ Mark resolved
+                </button>
+              )
             )}
-            {(onResolveWaiterCall || onDismissWaiterCall) && (
+          </div>
+        </div>
+      )}
+
+      {/* ── Real-Time Cash Payment Request Alert ── */}
+      {hasCashCall && (
+        <div style={{
+          background: cashCallState === 'ON_IT' ? '#f0f9ff' : '#ecfdf5',
+          border: `1.5px solid ${cashCallState === 'ON_IT' ? '#0284c7' : '#10b981'}`,
+          borderRadius: '10px',
+          padding: '12px 14px',
+          margin: '10px 0',
+          boxShadow: cashCallState === 'ON_IT' ? '0 2px 8px rgba(2,132,199,0.25)' : '0 2px 8px rgba(16,185,129,0.25)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '1.3rem' }}>{cashCallState === 'ON_IT' ? '🏃' : '💵'}</span>
+              <div>
+                <strong style={{ color: cashCallState === 'ON_IT' ? '#0369a1' : '#047857', fontSize: '0.85rem', display: 'block', textTransform: 'uppercase' }}>
+                  {cashCallState === 'ON_IT'
+                    ? `Collecting Cash from ${(cashCallInfo?.guestName || session?.guestName || 'Guest').toUpperCase()}`
+                    : `💵 ${(cashCallInfo?.guestName || session?.guestName || 'Guest').toUpperCase()} at Table ${table.number} wants to pay ₹${(cashCallInfo?.amount || (bill?.total ? Number(bill.total) : runningTotal > 0 ? runningTotal * 1.155 : 0)).toFixed(2)} in cash`}
+                </strong>
+                <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                  {cashCallState === 'ON_IT'
+                    ? `Staff attending table to collect ₹${(cashCallInfo?.amount || (bill?.total ? Number(bill.total) : runningTotal > 0 ? runningTotal * 1.155 : 0)).toFixed(2)} in cash`
+                    : 'Customer requested waiter to pay by cash'}
+                </span>
+              </div>
+            </div>
+            <span
+              style={{
+                fontSize: '0.7rem',
+                fontWeight: 700,
+                padding: '2px 8px',
+                borderRadius: '999px',
+                background: cashCallState === 'ON_IT' ? '#e0f2fe' : '#d1fae5',
+                color: cashCallState === 'ON_IT' ? '#0284c7' : '#065f46',
+              }}
+            >
+              {cashCallState === 'ON_IT' ? 'COLLECTING' : 'CASH'}
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+            {cashCallState !== 'ON_IT' ? (
+              onOnItCashCall && (
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  style={{
+                    flex: 1,
+                    background: '#0284c7',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontWeight: 700,
+                    padding: '8px 12px',
+                    cursor: 'pointer',
+                    fontSize: '0.82rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                    boxShadow: '0 2px 4px rgba(2,132,199,0.3)',
+                  }}
+                  onClick={onOnItCashCall}
+                >
+                  🏃 I'm on it
+                </button>
+              )
+            ) : (
               <button
                 type="button"
                 className="btn btn-sm"
                 style={{
                   flex: 1,
-                  background: '#16a34a',
+                  background: '#dc2626',
                   color: '#fff',
                   border: 'none',
-                  borderRadius: '6px',
+                  borderRadius: '8px',
                   fontWeight: 700,
-                  padding: '6px 12px',
+                  padding: '8px 12px',
                   cursor: 'pointer',
-                  fontSize: '0.8rem',
+                  fontSize: '0.84rem',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  gap: '4px',
-                  boxShadow: '0 2px 4px rgba(22,163,74,0.3)',
+                  gap: '6px',
+                  boxShadow: '0 2px 4px rgba(220,38,38,0.3)',
                 }}
-                onClick={onResolveWaiterCall || onDismissWaiterCall}
+                disabled={billingLoading}
+                onClick={async () => {
+                  setBillingLoading(true)
+                  try {
+                    if (bill?.id) {
+                      const { api: clientApi } = await import('../../api/client')
+                      await clientApi.processPayment(bill.id, {
+                        method: 'CASH',
+                        amount: Number(bill.total || 0),
+                        transaction_id: `POS-CASH-${Date.now().toString().slice(-6)}`,
+                      })
+                    }
+                    if (onResolveCashCall) {
+                      await onResolveCashCall()
+                    }
+                    await changeStatus(table.id, 'PAID')
+                    await refresh()
+                  } catch (err: any) {
+                    setStatusError(err.message || 'Failed to process cash payment')
+                  } finally {
+                    setBillingLoading(false)
+                  }
+                }}
               >
-                ✓ Resolved
+                💵 Paid by Cash
               </button>
             )}
           </div>
@@ -511,6 +651,32 @@ export function TableDetailPanel({
         )}
       </dl>
 
+      {/* Prominent Order Taking Action for Seated/Active Tables */}
+      {['SEATED', 'ACTIVE', 'OCCUPIED'].includes(table.status) && onTakeOrder && (
+        <div style={{ margin: '14px 0 10px' }}>
+          <button
+            type="button"
+            className="btn btn-primary btn-block"
+            onClick={onTakeOrder}
+            style={{
+              padding: '11px 16px',
+              fontSize: '0.92rem',
+              fontWeight: 800,
+              background: '#2563eb',
+              borderColor: '#2563eb',
+              boxShadow: '0 2px 6px rgba(37,99,235,0.25)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px',
+            }}
+          >
+            <span style={{ fontSize: '1.15rem' }}>🍽️</span>
+            <span>{items.length > 0 ? '+ Add More Items (Food & Drinks)' : '🍽️ Take Order (Food & Drinks)'}</span>
+          </button>
+        </div>
+      )}
+
       {showOrders && (
         <div className="panel-section">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
@@ -575,16 +741,6 @@ export function TableDetailPanel({
       )}
 
       <div className="panel-actions" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {['SEATED', 'ACTIVE', 'OCCUPIED'].includes(table.status) && onTakeOrder && (
-          <button
-            type="button"
-            className="btn btn-primary btn-block"
-            onClick={onTakeOrder}
-            style={{ fontWeight: 700 }}
-          >
-            🍽️ Take Order
-          </button>
-        )}
         {['AVAILABLE', 'SEATED'].includes(table.status) && (
           <PrintQRButton tableId={table.id} tableNumber={table.number} />
         )}

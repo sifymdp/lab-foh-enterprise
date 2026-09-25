@@ -24,7 +24,11 @@ export interface KitchenOrderItem {
   item_id?: string
   item_name: string
   quantity: number
+  unit_price?: number
   station?: string | null
+  notes?: string | null
+  allergy_flag?: boolean
+  item_status?: string
 }
 
 export type KitchenStation =

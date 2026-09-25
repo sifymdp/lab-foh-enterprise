@@ -10,7 +10,7 @@ interface TakeOrderModalProps {
 }
 
 export function TakeOrderModal({ table, onClose }: TakeOrderModalProps) {
-  const { sessions } = useFloor()
+  const { sessions, refresh } = useFloor()
   const [menuItems, setMenuItems] = useState<MenuItem[]>([])
   const [menuLoading, setMenuLoading] = useState(true)
   const [quantities, setQuantities] = useState<Record<string, number>>({})
@@ -18,7 +18,7 @@ export function TakeOrderModal({ table, onClose }: TakeOrderModalProps) {
   const [error, setError] = useState<string | null>(null)
 
   const session = sessions.find(
-    (s) => s.tableId === table.id && ['SEATED', 'ACTIVE'].includes(s.status),
+    (s) => (s.tableId === table.id || (s as any).table_id === table.id) && !s.closedAt && ['SEATED', 'ACTIVE', 'OCCUPIED'].includes(s.status),
   )
 
   useEffect(() => {
@@ -65,11 +65,12 @@ export function TakeOrderModal({ table, onClose }: TakeOrderModalProps) {
   }
 
   async function handleSubmit() {
-    if (!session || selectedItems.length === 0) return
+    if (selectedItems.length === 0) return
     setSubmitting(true)
     setError(null)
     try {
-      await ordersApi.place(table.id, selectedItems, session.id)
+      await ordersApi.place(table.id, selectedItems, session?.id)
+      await refresh()
       onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not place order')
@@ -90,10 +91,6 @@ export function TakeOrderModal({ table, onClose }: TakeOrderModalProps) {
     >
       <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
         <h3 id="take-order-title">Take order — Table {table.number}</h3>
-
-        {!session && (
-          <p className="form-error">No active guest session found for this table.</p>
-        )}
 
         {menuLoading ? (
           <p className="muted" style={{ fontSize: 13 }}>Loading menu…</p>
@@ -151,7 +148,7 @@ export function TakeOrderModal({ table, onClose }: TakeOrderModalProps) {
           <button
             type="button"
             className="btn btn-primary"
-            disabled={submitting || !session || selectedItems.length === 0}
+            disabled={submitting || selectedItems.length === 0}
             onClick={handleSubmit}
           >
             {submitting ? 'Placing…' : 'Place order'}

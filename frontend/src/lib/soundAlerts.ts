@@ -52,30 +52,49 @@ export function playWalkoutAlarm(): void {
 }
 
 /**
- * Play a softer notification chime for regular alerts.
+ * Play a crisp, realistic restaurant service bell ding-ding for waiter calls and cash payment requests.
  */
-export function playChime(): void {
+export function playWaiterBell(): void {
   try {
     const ctx = getAudioContext()
     if (!ctx) return
 
     const now = ctx.currentTime
-    const osc = ctx.createOscillator()
-    const gain = ctx.createGain()
 
-    osc.type = 'sine'
-    osc.frequency.setValueAtTime(523.25, now) // C5
-    osc.frequency.exponentialRampToValueAtTime(783.99, now + 0.18) // G5
+    // Two strikes: strike 1 at 0s, strike 2 at 0.16s
+    const strikes = [now, now + 0.16]
 
-    gain.gain.setValueAtTime(0.2, now)
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4)
+    strikes.forEach((t) => {
+      // Primary chime tone (High pure crystal bell - 1760 Hz / A6)
+      const osc1 = ctx.createOscillator()
+      const gain1 = ctx.createGain()
+      osc1.type = 'sine'
+      osc1.frequency.setValueAtTime(1760, t)
+      osc1.frequency.exponentialRampToValueAtTime(1750, t + 0.5)
 
-    osc.connect(gain)
-    gain.connect(ctx.destination)
+      gain1.gain.setValueAtTime(0.35, t)
+      gain1.gain.exponentialRampToValueAtTime(0.001, t + 0.5)
 
-    osc.start(now)
-    osc.stop(now + 0.4)
+      osc1.connect(gain1)
+      gain1.connect(ctx.destination)
+      osc1.start(t)
+      osc1.stop(t + 0.5)
+
+      // Metallic shimmer overtone (3520 Hz)
+      const osc2 = ctx.createOscillator()
+      const gain2 = ctx.createGain()
+      osc2.type = 'triangle'
+      osc2.frequency.setValueAtTime(3520, t)
+
+      gain2.gain.setValueAtTime(0.15, t)
+      gain2.gain.exponentialRampToValueAtTime(0.001, t + 0.25)
+
+      osc2.connect(gain2)
+      gain2.connect(ctx.destination)
+      osc2.start(t)
+      osc2.stop(t + 0.25)
+    })
   } catch (err) {
-    console.warn('[SoundAlert] Audio playback error:', err)
+    console.warn('[SoundAlert] Waiter bell playback error:', err)
   }
 }

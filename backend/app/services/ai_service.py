@@ -10,7 +10,7 @@ from app.services.ollama_service import generate_text, try_generate
 from app.socket_manager import emit_sync
 
 ROLE_FILTER: dict[str, list[str]] = {
-    "WAITER": ["WAIT_ALERT", "DIRTY_ALERT", "WAITER_CALL"],
+    "WAITER": ["WAIT_ALERT", "DIRTY_ALERT", "WAITER_CALL", "CASH_PAYMENT_REQUEST"],
     "HOST": ["WAIT_ALERT", "SEATING_SUGGESTION", "WAITER_CALL"],
     "MANAGER": [
         "WAIT_ALERT",
@@ -19,6 +19,7 @@ ROLE_FILTER: dict[str, list[str]] = {
         "SEATING_SUGGESTION",
         "SHIFT_REPORT",
         "WAITER_CALL",
+        "CASH_PAYMENT_REQUEST",
     ],
     "OWNER": [
         "WAIT_ALERT",
@@ -27,6 +28,7 @@ ROLE_FILTER: dict[str, list[str]] = {
         "SEATING_SUGGESTION",
         "SHIFT_REPORT",
         "WAITER_CALL",
+        "CASH_PAYMENT_REQUEST",
     ],
 }
 

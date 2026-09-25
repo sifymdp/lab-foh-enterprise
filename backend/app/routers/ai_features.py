@@ -1,4 +1,4 @@
-﻿"""Deterministic, local AI/KDS assistance endpoints.
+"""Deterministic, local AI/KDS assistance endpoints.
 
 These algorithms deliberately use the restaurant's own database and remain useful
 when no model server is configured.
@@ -210,21 +210,23 @@ def detect_anomalies(db: Session = Depends(get_db),
         table_label = table.number if table else "Table"
         if order.status == "RECEIVED":
             started = order.placed_at
-            warning_minutes = settings.received_alert_minutes
+            warning_minutes = getattr(settings, "received_alert_minutes", 10.0)
             event_type = "KITCHEN_ORDER_WAITING"
             target_role = "KITCHEN"
             warning_text = "Order has not been started."
         elif order.status == "READY":
-            started = order.ready_at
+            started = getattr(order, "ready_at", None) or getattr(order, "placed_at", None)
             if not started:
                 continue
-            warning_minutes = settings.ready_alert_minutes
+            warning_minutes = getattr(settings, "ready_alert_minutes", 5.0)
             event_type = "FOOD_WAITING"
             target_role = "WAITER"
             warning_text = "Food is waiting to be served."
         else:
-            started = order.preparation_started_at or order.placed_at
-            warning_minutes = settings.preparation_alert_minutes
+            started = getattr(order, "preparation_started_at", None) or getattr(order, "placed_at", None)
+            if not started:
+                continue
+            warning_minutes = getattr(settings, "preparation_alert_minutes", 20.0)
             event_type = "KITCHEN_PREPARATION_DELAY"
             target_role = "KITCHEN"
             warning_text = "Order preparation is taking longer than expected."
@@ -262,12 +264,14 @@ def detect_anomalies(db: Session = Depends(get_db),
                 AIEvent.resolved.is_(False),
             ).first()
             if not existing:
-                event = order_service.upsert_order_alert(
+                event = ai_service.create_alert(
                     db,
-                    order,
-                    event_type,
-                    message,
-                    target_role,
+                    AIEventCreate(
+                        event_type=event_type,
+                        message=message,
+                        target_role=target_role,
+                        table_id=order.table_id,
+                    ),
                 )
                 alerts_created.append(event.model_dump())
             else:
@@ -275,7 +279,15 @@ def detect_anomalies(db: Session = Depends(get_db),
                     existing.message = message
                     db.commit()
         else:
-            order_service.resolve_order_alerts(db, order.id, [event_type])
+            existing_alerts = db.query(AIEvent).filter(
+                AIEvent.event_type == event_type,
+                AIEvent.message.contains(order.id),
+                AIEvent.resolved.is_(False),
+            ).all()
+            for al in existing_alerts:
+                al.resolved = True
+            if existing_alerts:
+                db.commit()
 
     station_metrics: dict[str, dict[str, float | int]] = {}
     for row in rows:

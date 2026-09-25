@@ -15,6 +15,11 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173"
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "llama3.2:1b"
+
+    # Groq cloud LLM (free tier — get key from console.groq.com)
+    groq_api_key: str = ""
+    groq_model: str = "llama-3.3-70b-versatile"        # text generation
+    groq_chat_model: str = "llama-3.3-70b-versatile"    # tool-calling chat
     guest_menu_base_url: str = "http://localhost:8000"
     payment_webhook_secret: str = "dev-webhook-secret"
 
@@ -58,6 +63,11 @@ class Settings(BaseSettings):
     stream_inference_stride: int = 2
     stream_roi_match_min_overlap: float = 0.3
     default_camera_url: str | None = None
+
+    # Kitchen alert thresholds (minutes)
+    received_alert_minutes: float = 10.0
+    preparation_alert_minutes: float = 20.0
+    ready_alert_minutes: float = 5.0
 
     # Customer self-service booking & OTP settings (Member 4 feature)
     customer_otp_expiry_minutes: int = 10

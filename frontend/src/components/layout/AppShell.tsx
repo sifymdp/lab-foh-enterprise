@@ -214,8 +214,8 @@ export function AppShell() {
     const kitchen = { to: '/kitchen', label: 'Kitchen Display', icon: '👨‍🍳' }
     if (hasP('kitchen.view') || hasP('kds.view')) items.push(kitchen)
 
-    // High-Density Kanban Board (Member 2)
-    const kds = { to: '/kds', label: 'KDS Board (Kanban)', icon: '⚡' }
+    // High-Density KDS Board
+    const kds = { to: '/kds', label: 'KDS Board', icon: '⚡' }
     if (hasP('kitchen.view') || hasP('kds.view')) items.push(kds)
 
     // AI Customer Booking & Waitlist Stand (Member 4)
