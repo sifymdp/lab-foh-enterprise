@@ -93,59 +93,177 @@ def verify_otp(db: Session, email: str, code: str) -> tuple[str, str]:
     return create_customer_access_token(email)
 
 
+def expire(db: Session, row: Reservation) -> None:
+    table = db.get(Table, row.table_id)
+    row.status = "EXPIRED"
+    if table and table.status == "RESERVED":
+        table.status = "AVAILABLE"
+        table.reserved_until = None
+        record_history(db, table.id, "RESERVED", "AVAILABLE", None)
+    db.commit()
+    if table:
+        emit_sync("reservation.expired", {"reservationId": row.id, "tableId": table.id}, room=table.floor_id)
+        emit_sync("table_updated", _table_to_out(table).model_dump(by_alias=True), room=table.floor_id)
+
+
+def expire_pending(db: Session) -> None:
+    rows = db.query(Reservation).filter(
+        Reservation.status == "PENDING",
+        Reservation.expires_at.is_not(None),
+        Reservation.expires_at < _now(),
+    ).all()
+    for row in rows:
+        expire(db, row)
+
+
 def availability(db: Session, requested_date: str, requested_time: str, guests: int) -> dict:
-    slot = _parse_slot(requested_date, requested_time)
-    active = db.query(Reservation).filter(Reservation.status.in_(("PENDING", "CONFIRMED", "SEATED")),
-        Reservation.reserved_for <= slot, Reservation.reserved_until > slot).all()
-    blocked = {r.table_id for r in active}
-    reservations_by_table = {r.table_id: r for r in active}
-    tables = db.query(Table).filter(Table.capacity >= guests).all()
-    available_tables = [t for t in tables if t.id not in blocked]
-    unavailable_tables = [{"id": t.id, "number": t.number,
-                           "status": "BOOKED" if reservations_by_table[t.id].status == "CONFIRMED" else "RESERVED"}
-                          for t in tables if t.id in reservations_by_table]
-    best_table = min(available_tables, key=lambda table: table.capacity - guests, default=None)
+    expire_pending(db)
+    slot_start = _parse_slot(requested_date, requested_time)
+    duration = timedelta(minutes=settings.customer_booking_duration_minutes)
+    slot_end = slot_start + duration
+    now = _now()
+    is_today = (slot_start.date() == now.date())
+
+    active_reservations = db.query(Reservation).filter(
+        Reservation.status.in_(("PENDING", "CONFIRMED", "SEATED")),
+        Reservation.reserved_for < slot_end,
+        Reservation.reserved_until > slot_start,
+    ).all()
+    res_by_table = {r.table_id: r for r in active_reservations}
+
+    all_tables = db.query(Table).all()
+    available_tables: list[dict] = []
+    unavailable_tables: list[dict] = []
+
+    for t in all_tables:
+        res = res_by_table.get(t.id)
+        if res:
+            res_status = "BOOKED" if res.status == "CONFIRMED" else "RESERVED"
+            unavailable_tables.append({
+                "id": t.id,
+                "number": t.number,
+                "capacity": t.capacity,
+                "status": res_status,
+                "reason": f"Reserved ({res.guest_name or 'Guest'})",
+            })
+            continue
+
+        if is_today:
+            if t.status == "RESERVED":
+                unavailable_tables.append({
+                    "id": t.id,
+                    "number": t.number,
+                    "capacity": t.capacity,
+                    "status": "RESERVED",
+                    "reason": "Reserved on floor plan",
+                })
+                continue
+            elif t.status in ("ACTIVE", "BILLING", "SEATED", "OCCUPIED"):
+                unavailable_tables.append({
+                    "id": t.id,
+                    "number": t.number,
+                    "capacity": t.capacity,
+                    "status": "ACTIVE" if t.status == "ACTIVE" else "OCCUPIED",
+                    "reason": f"Table is currently {t.status.lower()} with guests",
+                })
+                continue
+            elif t.status in ("DIRTY", "CLEANING", "MAINTENANCE"):
+                unavailable_tables.append({
+                    "id": t.id,
+                    "number": t.number,
+                    "capacity": t.capacity,
+                    "status": "MAINTENANCE",
+                    "reason": "Table in maintenance / cleaning",
+                })
+                continue
+        else:
+            if t.status in ("MAINTENANCE",):
+                unavailable_tables.append({
+                    "id": t.id,
+                    "number": t.number,
+                    "capacity": t.capacity,
+                    "status": "MAINTENANCE",
+                    "reason": "Table out of service",
+                })
+                continue
+
+        if t.capacity < guests:
+            unavailable_tables.append({
+                "id": t.id,
+                "number": t.number,
+                "capacity": t.capacity,
+                "status": "CAPACITY_TOO_SMALL",
+                "reason": f"Capacity ({t.capacity} seats) too small for {guests} guests",
+            })
+            continue
+
+        available_tables.append({
+            "id": t.id,
+            "number": t.number,
+            "capacity": t.capacity,
+            "status": "AVAILABLE",
+        })
+
+    best_table = min(available_tables, key=lambda table: table["capacity"] - guests, default=None)
     available = bool(available_tables)
+
     return {
         "requested_date": requested_date,
         "requested_time": requested_time,
         "guests": guests,
         "available": available,
         "best_time": requested_time if available else None,
-        "best_table": ({"id": best_table.id, "number": best_table.number, "capacity": best_table.capacity}
-                        if best_table else None),
+        "best_table": (
+            {"id": best_table["id"], "number": best_table["number"], "capacity": best_table["capacity"]}
+            if best_table else None
+        ),
         "availability_score": 100 if available else 0,
-        "available_tables": [{"id": t.id, "number": t.number, "capacity": t.capacity, "status": "AVAILABLE"}
-                             for t in available_tables],
+        "available_tables": available_tables,
         "unavailable_tables": unavailable_tables,
-        "busy_tables": [t.number for t in tables if t.id in blocked],
-        "message": (f"Table {best_table.number} is available at {requested_time}." if best_table
-                    else "No table is available at the selected time."),
+        "busy_tables": [t["number"] for t in unavailable_tables if t["status"] != "CAPACITY_TOO_SMALL"],
+        "message": (
+            f"Table {best_table['number']} ({best_table['capacity']} seats) is available at {requested_time}."
+            if best_table
+            else "No table is available for your party size at the selected time."
+        ),
     }
 
 
 def hold(db: Session, email: str, table_id: str, guest_name: str, date_value: str, time_value: str, guests: int) -> Reservation:
-    slot = _parse_slot(date_value, time_value)
+    expire_pending(db)
+    slot_start = _parse_slot(date_value, time_value)
+    duration = timedelta(minutes=settings.customer_booking_duration_minutes)
+    slot_end = slot_start + duration
     now = _now()
+
     table = db.query(Table).filter(Table.id == table_id).with_for_update().first()
     if not table:
         raise HTTPException(status_code=404, detail="Table not found")
-    db.query(Reservation).filter(Reservation.status == "PENDING", Reservation.expires_at.is_not(None), Reservation.expires_at < now).update({Reservation.status: "EXPIRED"}, synchronize_session=False)
+
     conflict = db.query(Reservation).filter(
-    Reservation.table_id == table_id,
-    Reservation.status.in_((
-        "PENDING",
-        "CONFIRMED",
-        "SEATED",
-    )),
-    Reservation.reserved_for <= slot,
-    Reservation.reserved_until > slot
+        Reservation.table_id == table_id,
+        Reservation.status.in_(("PENDING", "CONFIRMED", "SEATED")),
+        Reservation.reserved_for < slot_end,
+        Reservation.reserved_until > slot_start,
     ).first()
     if conflict:
         db.rollback()
         raise HTTPException(status_code=409, detail="Sorry, this table was just booked. Please select another table.")
+
+    if slot_start.date() == now.date():
+        if table.status in ("ACTIVE", "BILLING", "SEATED", "OCCUPIED"):
+            db.rollback()
+            raise HTTPException(status_code=409, detail=f"Table {table.number} is currently occupied with guests ({table.status}). Please choose another table.")
+        elif table.status == "RESERVED":
+            db.rollback()
+            raise HTTPException(status_code=409, detail=f"Table {table.number} is currently reserved. Please choose another table.")
+        elif table.status in ("DIRTY", "CLEANING", "MAINTENANCE"):
+            db.rollback()
+            raise HTTPException(status_code=409, detail=f"Table {table.number} is undergoing maintenance. Please choose another table.")
+
     if guests > table.capacity:
         raise HTTPException(status_code=400, detail="Party size exceeds table capacity")
+
     expires = now + timedelta(minutes=settings.customer_hold_minutes)
     t_id = getattr(table, "tenant_id", None) or "org-demo"
     b_id = getattr(table, "branch_id", None)
@@ -156,8 +274,8 @@ def hold(db: Session, email: str, table_id: str, guest_name: str, date_value: st
         branch_id=b_id,
         guest_name=guest_name,
         party_size=guests,
-        reserved_for=slot,
-        reserved_until=slot + timedelta(minutes=settings.customer_booking_duration_minutes),
+        reserved_for=slot_start,
+        reserved_until=slot_end,
         status="PENDING",
         notes="Customer booking hold",
         customer_email=email,
@@ -283,22 +401,3 @@ def cancel(db: Session, email: str, reservation_id: str) -> Reservation:
         emit_sync("reservation.cancelled", {"reservationId": row.id, "tableId": table.id}, room=table.floor_id)
         emit_sync("table_updated", _table_to_out(table).model_dump(by_alias=True), room=table.floor_id)
     return row
-
-
-def expire(db: Session, row: Reservation) -> None:
-    table = db.get(Table, row.table_id)
-    row.status = "EXPIRED"
-    if table and table.status == "RESERVED":
-        table.status = "AVAILABLE"
-        table.reserved_until = None
-        record_history(db, table.id, "RESERVED", "AVAILABLE", None)
-    db.commit()
-    if table:
-        emit_sync("reservation.expired", {"reservationId": row.id, "tableId": table.id}, room=table.floor_id)
-        emit_sync("table_updated", _table_to_out(table).model_dump(by_alias=True), room=table.floor_id)
-
-
-def expire_pending(db: Session) -> None:
-    rows = db.query(Reservation).filter(Reservation.status == "PENDING", Reservation.expires_at.is_not(None), Reservation.expires_at < _now()).all()
-    for row in rows:
-        expire(db, row)

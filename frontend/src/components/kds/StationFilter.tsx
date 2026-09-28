@@ -8,6 +8,164 @@ export interface StationFilterProps {
   className?: string
 }
 
+export function matchItemStation(item: any, stationVal: KitchenStation | string): boolean {
+  if (!stationVal || stationVal === 'ALL') return true
+  const st = String(item?.station || '').toUpperCase()
+  const name = String(item?.item_name || '').toLowerCase()
+  const cat = String(item?.category || '').toLowerCase()
+  const sUpper = String(stationVal).toUpperCase()
+
+  // 1. Direct station string match
+  if (st && (st === sUpper || st.includes(sUpper) || sUpper.includes(st))) return true
+
+  // 2. North Indian (Curries, Gravies, Dal, Biryani, Naan, Paneer)
+  if (sUpper.includes('NORTH')) {
+    if (st.includes('NORTH') || st.includes('GRAVY') || cat.includes('north')) return true
+    if (
+      /makhani|butter chicken|dal|bukhara|paneer|lababdar|awadhi|biryani|naan|roti|kulcha|gosht|korma|curry|masala|sheermal|galouti|paratha/i.test(
+        name
+      )
+    ) {
+      return true
+    }
+    return false
+  }
+
+  // 3. South Indian (Dosa, Idli, Vada, Chettinad, Parotta, Meen Pollichathu)
+  if (sUpper.includes('SOUTH')) {
+    if (st.includes('SOUTH') || cat.includes('south')) return true
+    if (
+      /dosa|idli|vada|chettinad|parotta|sambar|rasam|uttapam|podi|pollichathu|meen|malabar|ghee roast|curry leaf/i.test(
+        name
+      )
+    ) {
+      return true
+    }
+    return false
+  }
+
+  // 4. Tandoor & Kebab (Tikka, Kebabs, Grills, Charcoal)
+  if (sUpper.includes('TANDOOR') || sUpper.includes('KEBAB') || sUpper.includes('GRILL')) {
+    if (
+      st.includes('TANDOOR') ||
+      st.includes('KEBAB') ||
+      st.includes('GRILL') ||
+      cat.includes('tandoor') ||
+      cat.includes('starter') ||
+      cat.includes('kebab')
+    ) {
+      return true
+    }
+    if (/tikka|kebab|tandoor|sheekh|galouti|chaat|paneer tikka|murgh tikka|charcoal/i.test(name)) {
+      return true
+    }
+    return false
+  }
+
+  // 5. Chinese & Pan-Asian (Dim Sum, Noodles, Wok, Hakka, Kung Pao)
+  if (sUpper.includes('CHINESE') || sUpper.includes('ASIAN') || sUpper.includes('WOK')) {
+    if (
+      st.includes('CHINESE') ||
+      st.includes('ASIAN') ||
+      st.includes('WOK') ||
+      cat.includes('chinese') ||
+      cat.includes('asian')
+    ) {
+      return true
+    }
+    if (
+      /dim sum|noodles|hakka|fried rice|manchurian|kung pao|lotus stem|wonton|edamame|chilli garlic|sea bass|schezwan/i.test(
+        name
+      )
+    ) {
+      return true
+    }
+    return false
+  }
+
+  // 6. Italian & Pizza (Wood-Fired Pizza, Pasta, Risotto, Continental)
+  if (sUpper.includes('PIZZA') || sUpper.includes('ITALIAN') || sUpper.includes('CONTINENTAL')) {
+    if (
+      st.includes('PIZZA') ||
+      st.includes('ITALIAN') ||
+      st.includes('CONTINENTAL') ||
+      cat.includes('pizza') ||
+      cat.includes('pasta') ||
+      cat.includes('italian') ||
+      cat.includes('continental')
+    ) {
+      return true
+    }
+    if (
+      /pizza|pasta|margherita|burrata|risotto|alfredo|fettuccine|lasagna|burger|fries|sandwich|penne/i.test(
+        name
+      )
+    ) {
+      return true
+    }
+    return false
+  }
+
+  // 7. Bar & Drinks (Cocktails, Spirits, Gin, Tonic, Brews, Beverages)
+  if (sUpper.includes('BAR') || sUpper.includes('DRINK') || sUpper.includes('BEVERAGE')) {
+    if (
+      st.includes('BAR') ||
+      st.includes('DRINK') ||
+      st.includes('BEVERAGE') ||
+      cat.includes('bar') ||
+      cat.includes('drink') ||
+      cat.includes('beverage')
+    ) {
+      return true
+    }
+    if (
+      /gin|tonic|whiskey|vodka|rum|beer|wine|cocktail|mocktail|macallan|saffron gin|lassi|shake|coffee|tea|soda|cooler|juice/i.test(
+        name
+      )
+    ) {
+      return true
+    }
+    return false
+  }
+
+  // 8. Dessert & Sweets (Mithai, Kulfi, Halwa, Pastries, Ice Cream)
+  if (sUpper.includes('DESSERT') || sUpper.includes('SWEET')) {
+    if (
+      st.includes('DESSERT') ||
+      st.includes('SWEET') ||
+      st.includes('BAKERY') ||
+      cat.includes('dessert') ||
+      cat.includes('sweet') ||
+      cat.includes('pastry')
+    ) {
+      return true
+    }
+    if (/jamun|rasmalai|ice cream|kulfi|halwa|brownie|cake|tiramisu|sweet|mithai/i.test(name)) {
+      return true
+    }
+    return false
+  }
+
+  // 9. Main Kitchen fallback
+  if (sUpper === 'MAIN KITCHEN') {
+    return true
+  }
+
+  return false
+}
+
+export function getItemDisplayStation(item: any): string {
+  if (item?.station && item.station !== 'MAIN KITCHEN') return item.station
+  if (matchItemStation(item, 'SOUTH INDIAN')) return 'SOUTH INDIAN'
+  if (matchItemStation(item, 'NORTH INDIAN')) return 'NORTH INDIAN'
+  if (matchItemStation(item, 'TANDOOR')) return 'TANDOOR'
+  if (matchItemStation(item, 'CHINESE_WOK')) return 'CHINESE & ASIAN'
+  if (matchItemStation(item, 'PIZZA')) return 'ITALIAN & PIZZA'
+  if (matchItemStation(item, 'BAR')) return 'BAR & DRINKS'
+  if (matchItemStation(item, 'DESSERT')) return 'DESSERT'
+  return 'MAIN KITCHEN'
+}
+
 export const STATIONS: Array<{
   label: string
   sublabel: string
@@ -16,12 +174,14 @@ export const STATIONS: Array<{
   color: string
 }> = [
   { label: 'ALL SECTIONS', sublabel: 'Entire Kitchen Queue', value: 'ALL', icon: '🍳', color: '#64748b' },
-  { label: 'MAIN KITCHEN', sublabel: 'Mains & Curries', value: 'MAIN KITCHEN', icon: '👨‍🍳', color: '#0284c7' },
-  { label: 'GRILL', sublabel: 'Steaks & BBQ', value: 'GRILL', icon: '🥩', color: '#ea580c' },
-  { label: 'FRY', sublabel: 'Deep Fry & Appetizers', value: 'FRY', icon: '🍟', color: '#eab308' },
-  { label: 'PIZZA', sublabel: 'Oven & Flatbreads', value: 'PIZZA', icon: '🍕', color: '#dc2626' },
-  { label: 'BAR', sublabel: 'Drinks & Cocktails', value: 'BAR', icon: '🍸', color: '#8b5cf6' },
-  { label: 'DESSERT', sublabel: 'Sweets & Pastry', value: 'DESSERT', icon: '🍨', color: '#ec4899' },
+  { label: 'NORTH INDIAN', sublabel: 'Curries, Gravies & Naan', value: 'NORTH INDIAN', icon: '🍛', color: '#ea580c' },
+  { label: 'SOUTH INDIAN', sublabel: 'Dosa, Idli, Vada & Meals', value: 'SOUTH INDIAN', icon: '🥞', color: '#0284c7' },
+  { label: 'TANDOOR & KEBAB', sublabel: 'Tikka, Kebabs & Charcoal', value: 'TANDOOR', icon: '🍢', color: '#dc2626' },
+  { label: 'CHINESE & ASIAN', sublabel: 'Dim Sum, Noodles & Wok', value: 'CHINESE_WOK', icon: '🥢', color: '#eab308' },
+  { label: 'ITALIAN & PIZZA', sublabel: 'Wood-Fired Pizza & Pasta', value: 'PIZZA', icon: '🍕', color: '#b45309' },
+  { label: 'BAR & DRINKS', sublabel: 'Cocktails, Spirits & Beverages', value: 'BAR', icon: '🍸', color: '#8b5cf6' },
+  { label: 'DESSERT & SWEETS', sublabel: 'Mithai, Kulfi & Pastries', value: 'DESSERT', icon: '🍨', color: '#ec4899' },
+  { label: 'MAIN KITCHEN', sublabel: 'General Prep & Hot Line', value: 'MAIN KITCHEN', icon: '👨‍🍳', color: '#475569' },
 ]
 
 export function StationFilter({
@@ -47,13 +207,9 @@ export function StationFilter({
     }
 
     return activeOrders.reduce((sum, order) => {
-      const matchItems = (order.items || []).filter((i: any) => {
-        const itemStation = (i.station || 'MAIN KITCHEN').toUpperCase()
-        if (stationVal === 'MAIN KITCHEN') {
-          return itemStation === 'MAIN KITCHEN' || !i.station
-        }
-        return itemStation === stationVal.toUpperCase()
-      })
+      const matchItems = (order.items || []).filter((i: any) =>
+        matchItemStation(i, stationVal)
+      )
       return sum + matchItems.reduce((s: number, i: any) => s + (i.quantity || 1), 0)
     }, 0)
   }

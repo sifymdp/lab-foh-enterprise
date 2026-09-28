@@ -40,7 +40,7 @@ export function StatusButton({ order, onStatusChange }: StatusButtonProps) {
     <>
       <button
         type="button"
-        className="kds-button"
+        className={`kds-button kds-button--${order.status.toLowerCase()}`}
         onClick={handleClick}
         disabled={isLoading}
       >

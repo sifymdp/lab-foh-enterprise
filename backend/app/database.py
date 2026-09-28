@@ -46,12 +46,15 @@ def migrate_schema() -> None:
     """Additive schema migrations for SQLite dev fallback.
     PostgreSQL deployments use Alembic for versioned migrations.
     """
+    import app.models  # noqa: F401
+    Base.metadata.create_all(bind=engine)
     if not is_sqlite:
         return
     with engine.connect() as conn:
         tenant_tables = {
             "users", "floors", "sections", "tables", "reservations",
             "dining_sessions", "orders", "bills", "payments", "audit_logs",
+            "menu_items",
         }
         for table_name in tenant_tables:
             rows = conn.execute(text(f"PRAGMA table_info({table_name})")).fetchall()
@@ -133,8 +136,25 @@ def migrate_schema() -> None:
 
         mi_rows = conn.execute(text("PRAGMA table_info(menu_items)")).fetchall()
         mi_cols = {row[1] for row in mi_rows}
-        if mi_rows and "station" not in mi_cols:
-            conn.execute(text("ALTER TABLE menu_items ADD COLUMN station VARCHAR(32)"))
+        if mi_rows:
+            if "station" not in mi_cols:
+                conn.execute(text("ALTER TABLE menu_items ADD COLUMN station VARCHAR(32)"))
+            if "item_code" not in mi_cols:
+                conn.execute(text("ALTER TABLE menu_items ADD COLUMN item_code VARCHAR(64)"))
+            if "tax_rate" not in mi_cols:
+                conn.execute(text("ALTER TABLE menu_items ADD COLUMN tax_rate NUMERIC(5,2) DEFAULT 5.0"))
+            if "service_charge" not in mi_cols:
+                conn.execute(text("ALTER TABLE menu_items ADD COLUMN service_charge NUMERIC(5,2) DEFAULT 0.0"))
+            if "dietary_type" not in mi_cols:
+                conn.execute(text("ALTER TABLE menu_items ADD COLUMN dietary_type VARCHAR(20) DEFAULT 'VEG'"))
+            if "prep_time_minutes" not in mi_cols:
+                conn.execute(text("ALTER TABLE menu_items ADD COLUMN prep_time_minutes INTEGER DEFAULT 15"))
+            if "modifiers" not in mi_cols:
+                conn.execute(text("ALTER TABLE menu_items ADD COLUMN modifiers TEXT"))
+            if "allergens" not in mi_cols:
+                conn.execute(text("ALTER TABLE menu_items ADD COLUMN allergens TEXT"))
+            if "is_active" not in mi_cols:
+                conn.execute(text("ALTER TABLE menu_items ADD COLUMN is_active BOOLEAN DEFAULT 1"))
 
         aiev_rows = conn.execute(text("PRAGMA table_info(ai_events)")).fetchall()
         aiev_cols = {row[1] for row in aiev_rows}

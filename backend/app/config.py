@@ -2,7 +2,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=(".env", "backend/.env", "../backend/.env"),
+        extra="ignore"
+    )
 
     database_url: str = "sqlite:///./foh.db"
     db_pool_size: int = 10
@@ -12,14 +15,25 @@ class Settings(BaseSettings):
 
     jwt_secret: str = "dev-secret-change-in-production"
     jwt_expire_hours: int = 8
-    cors_origins: str = "http://localhost:5173"
+    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "llama3.2:1b"
 
-    # Groq cloud LLM (free tier — get key from console.groq.com)
+    # LLM Provider Configuration
+    # 1. Groq (Free tier at https://console.groq.com)
     groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"        # text generation
-    groq_chat_model: str = "llama-3.3-70b-versatile"    # tool-calling chat
+    groq_chat_model: str = "llama-3.3-70b-versatile"   # tool-calling chat
+
+    # 2. Google Gemini (Free tier at https://aistudio.google.com)
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-2.0-flash"
+
+    # 3. OpenAI / OpenRouter / Custom compatible API
+    openai_api_key: str = ""
+    openai_model: str = "gpt-4o-mini"
+    openai_base_url: str = ""
+
     guest_menu_base_url: str = "http://localhost:8000"
     payment_webhook_secret: str = "dev-webhook-secret"
 

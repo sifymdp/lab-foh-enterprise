@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Integer, Numeric, String, Text
+from sqlalchemy import Boolean, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -19,6 +19,22 @@ class MenuItem(Base):
     display_order: Mapped[int] = mapped_column(Integer, default=0)
     # KDS station routing — ALL | GRILL | FRY | PIZZA | BAR | DESSERT (nullable = ALL)
     station: Mapped[str | None] = mapped_column(String(32), nullable=True, default=None)
+
+    # Enterprise Excel & Multi-tenant fields
+    item_code: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
+    tax_rate: Mapped[float] = mapped_column(Numeric(5, 2), default=5.0)
+    service_charge: Mapped[float] = mapped_column(Numeric(5, 2), default=0.0)
+    dietary_type: Mapped[str] = mapped_column(String(20), default="VEG")  # VEG | NON_VEG | LIQUOR
+    prep_time_minutes: Mapped[int] = mapped_column(Integer, default=15)
+    modifiers: Mapped[str | None] = mapped_column(Text, nullable=True)
+    allergens: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    tenant_id: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    branch_id: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("branches.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     @property
     def is_available(self) -> bool:

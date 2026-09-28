@@ -498,6 +498,12 @@ def seed_database(db: Session) -> None:
                 branch_id=branch.id,
             )
             db.add(res3)
+        else:
+            res3.reserved_for = now + timedelta(hours=2)
+            res3.reserved_until = now + timedelta(hours=3)
+            res3.status = "PENDING"
+            res3.guest_name = "Vikram Malhotra"
+            res3.party_size = 6
 
     # ── 9. Completed Sample Paid Bills & Payments for Today ──────────────────
     today_payments_data = [

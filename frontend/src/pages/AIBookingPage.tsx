@@ -34,12 +34,16 @@ type Availability = {
     id: string
     number: string
     capacity: number
+    status?: string
   }>
   unavailable_tables?: Array<{
     id: string
     number: string
-    status: 'BOOKED' | 'RESERVED'
+    capacity?: number
+    status: string
+    reason?: string
   }>
+  busy_tables?: string[]
 }
 
 function formatCustomerBookingTime(value: string): string {
@@ -431,16 +435,41 @@ export function AIBookingPage() {
       ? {
           ...floor,
 
-          tables: floor.tables.map((table) => ({
-            ...table,
-
-            status: (availableIds.has(table.id)
-              ? 'AVAILABLE'
-              : (unavailableById.get(table.id) as any) ??
-                'RESERVED') as import('../types').TableStatus,
-          })),
+          tables: floor.tables.map((table) => {
+            let status: import('../types').TableStatus = 'AVAILABLE'
+            if (availableIds.has(table.id)) {
+              status = 'AVAILABLE'
+            } else if (unavailableById.has(table.id)) {
+              const raw = unavailableById.get(table.id)
+              if (raw === 'BOOKED' || raw === 'RESERVED') {
+                status = 'RESERVED'
+              } else if (raw === 'BILLING') {
+                status = 'BILLING'
+              } else if (raw === 'MAINTENANCE') {
+                status = 'MAINTENANCE'
+              } else {
+                status = 'ACTIVE'
+              }
+            } else {
+              status = (table.status as import('../types').TableStatus) || 'AVAILABLE'
+            }
+            return {
+              ...table,
+              status,
+            }
+          }),
         }
       : floor
+
+  const selectedTable = displayFloor?.tables.find(
+    (t) => t.id === selection?.id,
+  )
+  const isSelectedAvailable = selectedTable
+    ? availableIds.has(selectedTable.id)
+    : false
+  const selectedUnavailableInfo = selectedTable
+    ? result?.unavailable_tables?.find((t) => t.id === selectedTable.id)
+    : undefined
 
   /*
     CREATE TEMPORARY HOLD
@@ -1177,15 +1206,32 @@ export function AIBookingPage() {
         <section className="panel customer-layout">
           <div className="customer-layout__header">
             <div>
-              <h2>
-                Choose from the floor plan
-              </h2>
+              <h2>Choose from the floor plan</h2>
 
               <p className="muted">
                 {result
-                  ? 'Available tables are shown for your selected time.'
+                  ? 'Available tables are shown in green for your selected time.'
                   : 'Check availability to see which tables are free.'}
               </p>
+
+              <div style={{ display: 'flex', gap: '14px', alignItems: 'center', marginTop: '6px', flexWrap: 'wrap', fontSize: '0.825rem' }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                  <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#22c55e', display: 'inline-block' }} />
+                  <span style={{ color: '#166534', fontWeight: 600 }}>Available to Book</span>
+                </span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                  <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#3b82f6', display: 'inline-block' }} />
+                  <span style={{ color: '#1e40af', fontWeight: 600 }}>Reserved</span>
+                </span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                  <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#eab308', display: 'inline-block' }} />
+                  <span style={{ color: '#854d0e', fontWeight: 600 }}>Occupied / Dining</span>
+                </span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                  <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#a855f7', display: 'inline-block' }} />
+                  <span style={{ color: '#6b21a8', fontWeight: 600 }}>Billing</span>
+                </span>
+              </div>
             </div>
 
             {selection?.type === 'table' &&
@@ -1193,9 +1239,7 @@ export function AIBookingPage() {
               availableIds.has(selection.id) && (
                 <button
                   className="btn btn-primary btn-sm"
-                  onClick={() =>
-                    hold(selection.id)
-                  }
+                  onClick={() => hold(selection.id)}
                   disabled={busy}
                 >
                   Choose table
@@ -1213,6 +1257,196 @@ export function AIBookingPage() {
             onSectionChange={() => undefined}
             onLabelChange={() => undefined}
           />
+
+          {selectedTable ? (
+            isSelectedAvailable ? (
+              <div
+                style={{
+                  marginTop: '1rem',
+                  padding: '1.25rem 1.5rem',
+                  background:
+                    'linear-gradient(135deg, rgba(34, 197, 94, 0.12), rgba(16, 185, 129, 0.08))',
+                  border: '1.5px solid rgba(34, 197, 94, 0.45)',
+                  borderRadius: '16px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '1rem',
+                  flexWrap: 'wrap',
+                  boxShadow: '0 4px 14px rgba(34, 197, 94, 0.12)',
+                }}
+              >
+                <div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      marginBottom: '4px',
+                    }}
+                  >
+                    <span
+                      style={{
+                        background: '#22c55e',
+                        color: '#fff',
+                        fontSize: '0.75rem',
+                        fontWeight: 700,
+                        padding: '3px 8px',
+                        borderRadius: '8px',
+                      }}
+                    >
+                      ✓ AVAILABLE
+                    </span>
+                    <strong
+                      style={{
+                        fontSize: '1.2rem',
+                        color: 'var(--text, #0f172a)',
+                      }}
+                    >
+                      Table {selectedTable.number}
+                    </strong>
+                    <span
+                      style={{
+                        color: 'var(--text-muted, #64748b)',
+                        fontSize: '0.9rem',
+                      }}
+                    >
+                      ({selectedTable.capacity} Seats · Party of {guests})
+                    </span>
+                  </div>
+                  <p
+                    style={{
+                      margin: 0,
+                      fontSize: '0.9rem',
+                      color: 'var(--text-muted, #64748b)',
+                    }}
+                  >
+                    Ready for your booking on {date} at {time}. Click to hold this table!
+                  </p>
+                </div>
+                <button
+                  className="btn btn-primary"
+                  style={{
+                    minWidth: '180px',
+                    padding: '10px 22px',
+                    fontSize: '1rem',
+                    fontWeight: 600,
+                  }}
+                  onClick={() => hold(selectedTable.id)}
+                  disabled={busy}
+                >
+                  {busy
+                    ? 'Reserving...'
+                    : `Book Table ${selectedTable.number} Now →`}
+                </button>
+              </div>
+            ) : (
+              <div
+                style={{
+                  marginTop: '1rem',
+                  padding: '1.25rem 1.5rem',
+                  background:
+                    selectedUnavailableInfo?.status === 'RESERVED' ||
+                    selectedTable.status === 'RESERVED'
+                      ? 'rgba(59, 130, 246, 0.08)'
+                      : 'rgba(234, 179, 8, 0.08)',
+                  border: `1.5px solid ${
+                    selectedUnavailableInfo?.status === 'RESERVED' ||
+                    selectedTable.status === 'RESERVED'
+                      ? 'rgba(59, 130, 246, 0.35)'
+                      : 'rgba(234, 179, 8, 0.35)'
+                  }`,
+                  borderRadius: '16px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '1rem',
+                  flexWrap: 'wrap',
+                }}
+              >
+                <div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      marginBottom: '4px',
+                    }}
+                  >
+                    <span
+                      style={{
+                        background:
+                          selectedUnavailableInfo?.status === 'RESERVED' ||
+                          selectedTable.status === 'RESERVED'
+                            ? '#3b82f6'
+                            : '#eab308',
+                        color: '#fff',
+                        fontSize: '0.75rem',
+                        fontWeight: 700,
+                        padding: '3px 8px',
+                        borderRadius: '8px',
+                      }}
+                    >
+                      {selectedUnavailableInfo?.status === 'RESERVED' ||
+                      selectedTable.status === 'RESERVED'
+                        ? '🔒 RESERVED'
+                        : selectedUnavailableInfo?.status ===
+                          'CAPACITY_TOO_SMALL'
+                        ? '⚠️ TOO SMALL'
+                        : '👥 OCCUPIED'}
+                    </span>
+                    <strong style={{ fontSize: '1.15rem' }}>
+                      Table {selectedTable.number} ({selectedTable.capacity}{' '}
+                      Seats)
+                    </strong>
+                  </div>
+                  <p
+                    style={{
+                      margin: 0,
+                      fontSize: '0.9rem',
+                      color: 'var(--text-muted, #64748b)',
+                    }}
+                  >
+                    {selectedUnavailableInfo?.reason ||
+                      (selectedTable.status === 'RESERVED'
+                        ? 'This table is already reserved.'
+                        : 'This table currently has guests seated.')}{' '}
+                    Please select an available green table.
+                  </p>
+                </div>
+                {result?.best_table && (
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => {
+                      setSelection({
+                        type: 'table',
+                        id: result.best_table!.id,
+                      })
+                      void hold(result.best_table!.id)
+                    }}
+                    disabled={busy}
+                  >
+                    Book Recommended Table {result.best_table.number} instead →
+                  </button>
+                )}
+              </div>
+            )
+          ) : (
+            <div
+              style={{
+                marginTop: '0.75rem',
+                padding: '0.75rem 1rem',
+                background: 'rgba(0,0,0,0.03)',
+                borderRadius: '12px',
+                fontSize: '0.875rem',
+                color: 'var(--text-muted, #64748b)',
+                textAlign: 'center',
+              }}
+            >
+              💡 <strong>Interactive Floor Plan:</strong> Click on any green table
+              above to view details and reserve it instantly.
+            </div>
+          )}
         </section>
       )}
 
@@ -1228,48 +1462,87 @@ export function AIBookingPage() {
 
           {result.best_table && (
             <p>
-              Table{' '}
-              {result.best_table.number},{' '}
-              {result.best_table.capacity} seats
-              at {result.best_time}.
-              Availability score:{' '}
-              {result.availability_score}%
+              Table {result.best_table.number},{' '}
+              {result.best_table.capacity} seats at {result.best_time}.
+              Availability score: {result.availability_score}%
             </p>
           )}
 
           <div className="customer-options">
-            {(result.available_tables ?? []).map(
-              (table) => (
-                <article
-                  className="option"
-                  key={table.id}
+            {(result.available_tables ?? []).map((table) => (
+              <article className="option" key={table.id}>
+                <strong>Table {table.number}</strong>
+                <span>{table.capacity} seats</span>
+
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={() => {
+                    setSelection({
+                      type: 'table',
+                      id: table.id,
+                    })
+                    void hold(table.id)
+                  }}
+                  disabled={busy}
                 >
-                  <strong>
-                    Table {table.number}
-                  </strong>
-
-                  <span>
-                    {table.capacity} seats
-                  </span>
-
-                  <button
-                    className="btn btn-primary btn-sm"
-                    onClick={() => {
-                      setSelection({
-                        type: 'table',
-                        id: table.id,
-                      })
-
-                      void hold(table.id)
-                    }}
-                    disabled={busy}
-                  >
-                    Choose table
-                  </button>
-                </article>
-              ),
-            )}
+                  Choose table
+                </button>
+              </article>
+            ))}
           </div>
+
+          {result.unavailable_tables &&
+            result.unavailable_tables.length > 0 && (
+              <div
+                style={{
+                  marginTop: '1.5rem',
+                  borderTop: '1px solid rgba(0,0,0,0.06)',
+                  paddingTop: '1rem',
+                }}
+              >
+                <h4
+                  style={{
+                    fontSize: '0.95rem',
+                    color: 'var(--text-muted, #64748b)',
+                    marginBottom: '0.75rem',
+                  }}
+                >
+                  Unavailable tables for this slot (
+                  {result.unavailable_tables.length})
+                </h4>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  {result.unavailable_tables.map((t) => (
+                    <span
+                      key={t.id}
+                      style={{
+                        fontSize: '0.825rem',
+                        padding: '4px 10px',
+                        borderRadius: '8px',
+                        background:
+                          t.status === 'RESERVED'
+                            ? 'rgba(59, 130, 246, 0.1)'
+                            : 'rgba(234, 179, 8, 0.1)',
+                        color:
+                          t.status === 'RESERVED' ? '#1e40af' : '#854d0e',
+                        border: `1px solid ${
+                          t.status === 'RESERVED'
+                            ? 'rgba(59, 130, 246, 0.25)'
+                            : 'rgba(234, 179, 8, 0.25)'
+                        }`,
+                      }}
+                      title={t.reason}
+                    >
+                      Table {t.number}:{' '}
+                      {t.status === 'RESERVED'
+                        ? 'Reserved'
+                        : t.status === 'CAPACITY_TOO_SMALL'
+                        ? 'Too Small'
+                        : 'Occupied'}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
         </section>
       )}
     </main>

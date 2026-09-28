@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { menuApi, type MenuItem } from '../api/extensions'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
+import { BulkMenuModal } from '../components/menu/BulkMenuModal'
+import { useAuth } from '../context/AuthContext'
+import { useSocket } from '../context/SocketContext'
 import { humanizeApiError } from '../lib/apiErrors'
 
 export interface CuisineCategory {
@@ -126,14 +129,19 @@ function getAllergenTags(item: MenuItem): Array<{ label: string; color: string; 
 }
 
 export function MenuPage() {
+  const { user } = useAuth()
+  const { on } = useSocket()
   const [items, setItems] = useState<MenuItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [showForm, setShowForm] = useState(false)
+  const [showBulkModal, setShowBulkModal] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
   const [populating, setPopulating] = useState(false)
+
+  const canManageBulk = user?.role === 'OWNER' || user?.role === 'MANAGER'
 
   // Filters & View State
   const [activeCuisine, setActiveCuisine] = useState<string>('All')
@@ -165,6 +173,15 @@ export function MenuPage() {
   useEffect(() => {
     load()
   }, [load])
+
+  // Live WebSocket menu update synchronization
+  useEffect(() => {
+    const unsub = on('menu:updated', () => {
+      load()
+      showToast('Live Menu synchronized with database update', 'info')
+    })
+    return unsub
+  }, [on, load])
 
   useEffect(() => {
     if (!toast) return
@@ -283,6 +300,7 @@ export function MenuPage() {
       const q = searchQuery.toLowerCase().trim()
       result = result.filter((i) =>
         i.name.toLowerCase().includes(q) ||
+        (i.itemCode && i.itemCode.toLowerCase().includes(q)) ||
         (i.description && i.description.toLowerCase().includes(q)) ||
         i.category.toLowerCase().includes(q)
       )
@@ -369,7 +387,28 @@ export function MenuPage() {
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          {canManageBulk && (
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => setShowBulkModal(true)}
+              style={{
+                fontSize: '0.8rem',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(5, 150, 105, 0.08) 100%)',
+                color: '#059669',
+                borderColor: 'rgba(16, 185, 129, 0.35)',
+                fontWeight: 600,
+              }}
+              title="Bulk Import, Export & Version Menu via Excel"
+            >
+              <span>📊</span>
+              <span>Bulk Menu (Excel)</span>
+            </button>
+          )}
           <button
             type="button"
             className="btn btn-secondary btn-sm"
@@ -670,6 +709,20 @@ export function MenuPage() {
                             <span className={`dietary-icon-box ${dType}`} title={dType === 'veg' ? 'Vegetarian' : dType === 'non-veg' ? 'Non-Vegetarian' : 'Alcoholic / Liquor'}>
                               {dType === 'liquor' ? '🍸' : ''}
                             </span>
+                            {item.itemCode && (
+                              <span style={{
+                                fontSize: '0.68rem',
+                                fontFamily: 'monospace',
+                                fontWeight: 700,
+                                background: 'var(--surface-2)',
+                                color: 'var(--text-muted)',
+                                padding: '1px 5px',
+                                borderRadius: '4px',
+                                border: '1px solid var(--border)',
+                              }}>
+                                {item.itemCode}
+                              </span>
+                            )}
                             <span style={{
                               fontSize: '0.72rem',
                               fontWeight: 700,
@@ -806,6 +859,7 @@ export function MenuPage() {
                   <thead>
                     <tr style={{ background: 'var(--surface-2)', borderBottom: '1px solid var(--border)', textAlign: 'left', color: 'var(--text-muted)', fontSize: '0.75rem', textTransform: 'uppercase' }}>
                       <th style={{ padding: '10px 16px', width: '35px' }}>Type</th>
+                      <th style={{ padding: '10px 16px', width: '90px' }}>Code</th>
                       <th style={{ padding: '10px 16px' }}>Dish / Beverage</th>
                       <th style={{ padding: '10px 16px' }}>Category</th>
                       <th style={{ padding: '10px 16px', textAlign: 'right' }}>Price</th>
@@ -823,6 +877,11 @@ export function MenuPage() {
                         <tr key={item.id} style={{ borderBottom: isLast ? 'none' : '1px solid var(--border)', opacity: item.available ? 1 : 0.6 }}>
                           <td style={{ padding: '12px 16px' }}>
                             <span className={`dietary-icon-box ${dType}`} />
+                          </td>
+                          <td style={{ padding: '12px 16px' }}>
+                            <code style={{ fontSize: '0.78rem', color: '#0284c7', background: 'rgba(2,132,199,0.08)', padding: '2px 6px', borderRadius: '4px' }}>
+                              {item.itemCode || '—'}
+                            </code>
                           </td>
                           <td style={{ padding: '12px 16px' }}>
                             <strong style={{ fontSize: '0.9rem', color: 'var(--text)' }}>{item.name}</strong>
@@ -1048,6 +1107,18 @@ export function MenuPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── Smart Bulk Menu Excel Import / Export Modal ── */}
+      {showBulkModal && (
+        <BulkMenuModal
+          isOpen={showBulkModal}
+          onClose={() => setShowBulkModal(false)}
+          onSuccess={() => {
+            load()
+            showToast('Bulk menu import applied successfully!')
+          }}
+        />
       )}
     </div>
   )

@@ -76,6 +76,12 @@ export function TableMarker({
 
   const showHandles = editable && (selected || dragging)
 
+  const displayTableNumber = table.number.startsWith('T')
+    ? table.number
+    : /^\d+$/.test(table.number)
+    ? `T${table.number}`
+    : table.number
+
   return (
     <button
       type="button"
@@ -118,7 +124,7 @@ export function TableMarker({
         style={{ backgroundColor: style.border }}
         aria-hidden
       />
-      <span className="table-marker__number">T{table.number}</span>
+      <span className="table-marker__number">{displayTableNumber}</span>
       <span className="table-marker__capacity">
         <span className="table-marker__guests" aria-hidden>
           👤

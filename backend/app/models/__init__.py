@@ -10,6 +10,7 @@ from app.models.table import Table
 from app.models.reservation import Reservation
 from app.models.status_history import StatusHistory
 from app.models.menu_item import MenuItem
+from app.models.menu_bulk import MenuImport, MenuImportItem, MenuVersion, MenuChangeLog
 from app.models.session import DiningSession
 from app.models.order import Order
 from app.models.order_item import OrderItem
@@ -53,6 +54,10 @@ __all__ = [
     "Reservation",
     "StatusHistory",
     "MenuItem",
+    "MenuImport",
+    "MenuImportItem",
+    "MenuVersion",
+    "MenuChangeLog",
     "DiningSession",
     "Order",
     "OrderItem",

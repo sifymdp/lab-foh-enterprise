@@ -4,7 +4,7 @@
  */
 
 const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true'
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
+const API_URL = import.meta.env.VITE_API_URL || (typeof window !== 'undefined' && window.location.port === '5173' ? '' : 'http://127.0.0.1:8000')
 
 function humanizeStatus(status: number, detail?: string): string {
   if (status === 401) return 'Your session has expired. Please log in again.'
@@ -47,6 +47,44 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
   return res.json() as Promise<T>
 }
 
+async function apiDownloadBlob(path: string, filename: string): Promise<void> {
+  const token = getToken()
+  const res = await fetch(`${API_URL}${path}`, {
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(humanizeStatus(res.status, body.detail))
+  }
+  const blob = await res.blob()
+  const url = window.URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  window.URL.revokeObjectURL(url)
+}
+
+async function apiUploadForm<T>(path: string, formData: FormData): Promise<T> {
+  const token = getToken()
+  const res = await fetch(`${API_URL}${path}`, {
+    method: 'POST',
+    body: formData,
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(humanizeStatus(res.status, body.detail))
+  }
+  return res.json() as Promise<T>
+}
+
 // ─── Menu ────────────────────────────────────────────────────────────────────
 
 export interface MenuItem {
@@ -57,11 +95,79 @@ export interface MenuItem {
   category: string
   available: boolean
   displayOrder: number
+  station?: string | null
+  itemCode?: string | null
+  taxRate?: number
+  serviceCharge?: number
+  dietaryType?: string
+  prepTimeMinutes?: number
+  modifiers?: string | null
+  allergens?: string | null
+  isActive?: boolean
+}
+
+export interface MenuImportSummary {
+  id: string
+  fileName: string
+  status: 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED' | string
+  totalRows: number
+  newCount: number
+  updatedCount: number
+  unchangedCount: number
+  errorCount: number
+  warningCount: number
+  deactivatedCount: number
+  createdAt: string
+  approvedAt?: string | null
+  uploadedBy?: string | null
+  approvedBy?: string | null
+}
+
+export interface MenuImportItem {
+  id: string
+  rowNumber: number
+  itemCode?: string | null
+  itemName: string
+  category: string
+  action: 'NEW' | 'UPDATED' | 'UNCHANGED' | 'ERROR' | 'POSSIBLE_DUPLICATE'
+  status: 'VALID' | 'WARNING' | 'ERROR'
+  errorMessage?: string | null
+  warningMessage?: string | null
+  similarityMatch?: string | null
+  similarityScore?: number | null
+  oldValues?: Record<string, any> | null
+  newValues?: Record<string, any> | null
+}
+
+export interface MenuImportDetail {
+  summary: MenuImportSummary
+  items: MenuImportItem[]
+  missingItems: MenuItem[]
+}
+
+export interface MenuVersion {
+  id: string
+  versionNumber: number
+  versionTag: string
+  createdAt: string
+  createdBy?: string | null
+  creatorName?: string | null
+  totalItems: number
+  newItemsCount: number
+  updatedItemsCount: number
+  deactivatedItemsCount: number
+  notes?: string | null
 }
 
 export const menuApi = {
-  list: () => apiFetch<MenuItem[]>('/menu/all'),
-  listPublic: () => apiFetch<MenuItem[]>('/menu'),
+  list: (branchId?: string) => {
+    const q = branchId ? `?branch_id=${branchId}` : ''
+    return apiFetch<MenuItem[]>(`/menu/all${q}`)
+  },
+  listPublic: (branchId?: string) => {
+    const q = branchId ? `?branch_id=${branchId}` : ''
+    return apiFetch<MenuItem[]>(`/menu${q}`)
+  },
   create: (data: Omit<MenuItem, 'id'>) =>
     apiFetch<MenuItem>('/menu/items', { method: 'POST', body: JSON.stringify(data) }),
   update: (id: string, data: Partial<MenuItem>) =>
@@ -69,11 +175,46 @@ export const menuApi = {
   remove: (id: string) =>
     apiFetch<void>(`/menu/items/${id}`, { method: 'DELETE' }),
   toggle: (id: string, available: boolean) => {
-    // The API determines the next state server-side; retain the caller's
-    // desired state in the public API for compatibility with existing views.
     void available
     return apiFetch<MenuItem>(`/menu/items/${id}/toggle`, { method: 'PATCH' })
   },
+
+  // Bulk Excel Operations
+  downloadTemplate: () => apiDownloadBlob('/menu/export/template', 'restaurant_menu_template.xlsx'),
+  downloadCurrentMenu: (branchId?: string) => {
+    const q = branchId ? `?branch_id=${branchId}` : ''
+    const dateStr = new Date().toISOString().slice(0, 10)
+    return apiDownloadBlob(`/menu/export/current${q}`, `current_menu_${dateStr}.xlsx`)
+  },
+  uploadExcel: (file: File, branchId?: string) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    const q = branchId ? `?branch_id=${branchId}` : ''
+    return apiUploadForm<MenuImportSummary>(`/menu/import/upload${q}`, formData)
+  },
+  getImportAnalysis: (importId: string) =>
+    apiFetch<MenuImportSummary>(`/menu/import/${importId}/analysis`),
+  getImportPreview: (importId: string, filter?: string) => {
+    const q = filter && filter !== 'ALL' ? `?filter=${filter}` : ''
+    return apiFetch<MenuImportDetail>(`/menu/import/${importId}/preview${q}`)
+  },
+  approveImport: (importId: string, deactivateMissing = false, notes?: string) =>
+    apiFetch<MenuVersion>(`/menu/import/${importId}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ deactivateMissing, notes }),
+    }),
+  rejectImport: (importId: string) =>
+    apiFetch<void>(`/menu/import/${importId}/reject`, { method: 'POST' }),
+  downloadErrorReport: (importId: string) =>
+    apiDownloadBlob(`/menu/import/${importId}/error-report`, `import_errors_${importId.slice(0, 8)}.xlsx`),
+  downloadImportReport: (importId: string) =>
+    apiDownloadBlob(`/menu/import/${importId}/report`, `menu_import_report_${importId.slice(0, 8)}.xlsx`),
+  listImportHistory: () =>
+    apiFetch<MenuImportSummary[]>('/menu/import/history'),
+  listVersions: () =>
+    apiFetch<MenuVersion[]>('/menu/versions'),
+  getVersionDetail: (versionId: string) =>
+    apiFetch<MenuVersion>(`/menu/versions/${versionId}`),
 }
 
 // ─── Orders ──────────────────────────────────────────────────────────────────

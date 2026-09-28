@@ -3,7 +3,7 @@ import { api, normalizeKitchenOrder } from '../api/client'
 import { useSocket } from '../context/SocketContext'
 import type { KitchenOrder, KitchenStation } from '../types'
 import { KDSSwitch } from '../components/kds/KDSSwitch'
-import { StationFilter } from '../components/kds/StationFilter'
+import { StationFilter, matchItemStation, getItemDisplayStation } from '../components/kds/StationFilter'
 import { OrderDetailModal } from '../components/kds/OrderDetailModal'
 import '../styles/kds.css'
 
@@ -79,11 +79,13 @@ interface OrderCardProps {
 function getStationTagClass(st?: string | null): string {
   if (!st) return 'station-tag--main'
   const s = st.toUpperCase()
-  if (s.includes('GRILL')) return 'station-tag--grill'
-  if (s.includes('FRY')) return 'station-tag--fry'
-  if (s.includes('PIZZA')) return 'station-tag--pizza'
-  if (s.includes('BAR')) return 'station-tag--bar'
-  if (s.includes('DESSERT')) return 'station-tag--dessert'
+  if (s.includes('NORTH')) return 'station-tag--north'
+  if (s.includes('SOUTH')) return 'station-tag--south'
+  if (s.includes('TANDOOR') || s.includes('GRILL')) return 'station-tag--grill'
+  if (s.includes('CHINESE') || s.includes('WOK') || s.includes('ASIAN') || s.includes('FRY')) return 'station-tag--asian'
+  if (s.includes('PIZZA') || s.includes('ITALIAN')) return 'station-tag--pizza'
+  if (s.includes('BAR') || s.includes('DRINK')) return 'station-tag--bar'
+  if (s.includes('DESSERT') || s.includes('SWEET')) return 'station-tag--dessert'
   return 'station-tag--main'
 }
 
@@ -126,12 +128,9 @@ function OrderCard({ order, selectedStation, onCardClick, onQuickAction, busy }:
       <div className="kds-order-card__body">
         <div className="kds-order-card__item-list">
           {items.map((item: any, idx: number) => {
-            const itemStation = (item.station || 'MAIN KITCHEN').toUpperCase()
+            const displayStation = getItemDisplayStation(item)
             const isStationMatch =
-              selectedStation !== 'ALL' &&
-              (selectedStation === 'MAIN KITCHEN'
-                ? itemStation === 'MAIN KITCHEN' || !item.station
-                : itemStation === selectedStation.toUpperCase())
+              selectedStation !== 'ALL' && matchItemStation(item, selectedStation)
             const isOtherStation = selectedStation !== 'ALL' && !isStationMatch
 
             return (
@@ -152,9 +151,9 @@ function OrderCard({ order, selectedStation, onCardClick, onQuickAction, busy }:
                     <span className="kds-order-card__prep-badge">🔥 Prep</span>
                   )}
                   <span
-                    className={`kds-order-card__station-tag ${getStationTagClass(item.station)}`}
+                    className={`kds-order-card__station-tag ${getStationTagClass(displayStation)}`}
                   >
-                    {item.station || 'MAIN KITCHEN'}
+                    {displayStation}
                   </span>
                 </div>
 
@@ -292,13 +291,7 @@ export function KitchenPage() {
     station === 'ALL'
       ? orders
       : orders.filter((order) =>
-          (order.items || []).some((item: any) => {
-            const itemStation = (item.station || 'MAIN KITCHEN').toUpperCase()
-            if (station === 'MAIN KITCHEN') {
-              return itemStation === 'MAIN KITCHEN' || !item.station
-            }
-            return itemStation === station.toUpperCase()
-          }),
+          (order.items || []).some((item: any) => matchItemStation(item, station)),
         )
 
   const receivingCount = orders.filter((o) => o.status === 'RECEIVED').length

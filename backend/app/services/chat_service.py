@@ -528,27 +528,310 @@ def _availability_question(text: str) -> bool:
     return bool(_AVAILABILITY_WORDS.search(t) and _TABLE_WORDS.search(t))
 
 
-def _fallback_reply(db: Session, message: str) -> str:
-    text = message.lower()
+def _fallback_process(db: Session, user: User, message: str) -> tuple[str, list[ChatAction]]:
+    """Intelligent local natural language engine.
 
-    party_match = re.search(r"(?:party|group|table)\s*(?:of|for)\s*(\d+)|(\d+)\s*(?:people|guests|pax)", text)
+    Parses operational commands and queries when no cloud LLM is active (or if
+    cloud API is unreachable), executing the exact same tools and status
+    transitions so the system remains fully functional in local/offline environments.
+    """
+    text = message.strip()
+    lower = text.lower()
+    actions: list[ChatAction] = []
+
+    # 1. Greetings & Help
+    if re.search(r"^(hi|hello|hey|greetings|good\s+(morning|afternoon|evening))\b", lower) or lower in (
+        "who are you", "what can you do", "help", "commands", "?"
+    ):
+        return (
+            f"Hello, {user.name}! I am your Front of House AI Assistant. "
+            "I can monitor floor status, seat guests, manage reservations, update menu items, and send alerts.\n\n"
+            "**Quick commands you can try:**\n"
+            "• *\"Seat party of 4 at T5\"* or *\"Seat John party of 2 at T1\"*\n"
+            "• *\"Clean table 2\"* or *\"Make T1 available\"*\n"
+            "• *\"Bill table 3\"* or *\"Close table 4\"*\n"
+            "• *\"Reserve T3 for Sarah party of 4 at 7:30 PM\"*\n"
+            "• *\"Show reservations\"* or *\"Show menu\"*\n"
+            "• *\"86 Ribeye Steak\"* or *\"Make Ribeye Steak available\"*\n"
+            "• *\"Shift report\"* or *\"Which tables are free?\"*\n"
+            "• *\"Alert waiter table 4 needs water\"*\n\n"
+            "How can I assist you right now?",
+            [],
+        )
+
+    # 2. Seating Walk-ins / Guests
+    # e.g. "seat party of 4 at T5", "seat 2 at table 1", "seat Alice party of 3 at T4", "seat T5"
+    seat_match = (
+        re.search(r"\bseat\s+([A-Za-z]+)\s+(?:party\s+of\s+|pax\s+)?(\d+)\s+(?:at|for|on)\s+(?:table\s+|t)?([a-zA-Z0-9]+)\b", lower)
+        or re.search(r"\bseat\s+(?:a\s+)?(?:party\s+of\s+)?(\d+)(?:\s+(?:guests|people|pax))?(?:\s+(?:at|on|for))?\s+(?:table\s+|t)?([a-zA-Z0-9]+)\b", lower)
+        or re.search(r"\bseat\s+(?:table\s+|t)?([a-zA-Z0-9]+)\s+(?:with\s+)?(?:party\s+of\s+)?(\d+)\b", lower)
+    )
+    if seat_match:
+        groups = seat_match.groups()
+        if len(groups) == 3 and not groups[0].isdigit():
+            # seat [Name] [party_size] [table]
+            guest_name = groups[0].title()
+            party_size = int(groups[1])
+            table_raw = groups[2]
+        elif len(groups) == 2 and groups[0].isdigit():
+            # seat [party_size] [table]
+            guest_name = "Walk-in"
+            party_size = int(groups[0])
+            table_raw = groups[1]
+        elif len(groups) == 2 and not groups[0].isdigit():
+            # seat [table] [party_size]
+            guest_name = "Walk-in"
+            table_raw = groups[0]
+            party_size = int(groups[1])
+        else:
+            guest_name = "Walk-in"
+            party_size = 2
+            table_raw = groups[0]
+
+        res, action = _execute_tool(
+            db, user, "seat_party",
+            {"table_number": table_raw, "party_size": party_size, "guest_name": guest_name}
+        )
+        if action:
+            actions.append(action)
+        if action and action.ok:
+            return (
+                f"Done! I've seated {guest_name} (party of {party_size}) at Table T{table_raw.upper().lstrip('T')}. "
+                "The table is now marked SEATED.",
+                actions,
+            )
+        return (
+            f"Couldn't seat party at Table T{table_raw}: {res.get('error', 'unknown error')}. "
+            f"{_availability_answer(db)}",
+            actions,
+        )
+
+    # 3. Clean / Bus Table
+    clean_match = re.search(r"\b(?:clean|bus|clear|cleared)\s+(?:table\s+|t)?([a-zA-Z0-9]+)\b", lower) or re.search(
+        r"\bmark\s+(?:table\s+|t)?([a-zA-Z0-9]+)\s+(?:as\s+)?clean(?:ing)?\b", lower
+    )
+    if clean_match:
+        t_num = clean_match.group(1).upper().lstrip("T")
+        res, action = _execute_tool(db, user, "set_table_status", {"table_number": t_num, "status": "CLEANING"})
+        if action:
+            actions.append(action)
+        if action and action.ok:
+            return f"Table T{t_num} is now set to CLEANING for the busser.", actions
+        return f"Could not set T{t_num} to CLEANING: {res.get('error')}", actions
+
+    # 4. Make Table Available / Free
+    free_match = re.search(
+        r"\b(?:make|mark|set|free)\s+(?:table\s+|t)?([a-zA-Z0-9]+)\s+(?:as\s+)?(?:available|free|open|ready)\b", lower
+    ) or re.search(r"\bfree\s+(?:up\s+)?(?:table\s+|t)?([a-zA-Z0-9]+)\b", lower)
+    if free_match:
+        t_num = free_match.group(1).upper().lstrip("T")
+        res, action = _execute_tool(db, user, "set_table_status", {"table_number": t_num, "status": "AVAILABLE"})
+        if action:
+            actions.append(action)
+        if action and action.ok:
+            return f"Table T{t_num} is now marked AVAILABLE and ready for new guests.", actions
+        return f"Could not free Table T{t_num}: {res.get('error')}", actions
+
+    # 5. Bill Table
+    bill_match = re.search(r"\b(?:bill|print\s+bill\s+for|mark\s+billing)\s+(?:table\s+|t)?([a-zA-Z0-9]+)\b", lower)
+    if bill_match:
+        t_num = bill_match.group(1).upper().lstrip("T")
+        res, action = _execute_tool(db, user, "set_table_status", {"table_number": t_num, "status": "BILLING"})
+        if action:
+            actions.append(action)
+        if action and action.ok:
+            return f"Table T{t_num} has been set to BILLING.", actions
+        return f"Could not set Table T{t_num} to billing: {res.get('error')}", actions
+
+    # 6. Close Table
+    close_match = re.search(r"\bclose\s+(?:table\s+|t)?([a-zA-Z0-9]+)\b", lower)
+    if close_match:
+        t_num = close_match.group(1).upper().lstrip("T")
+        res, action = _execute_tool(db, user, "close_table", {"table_number": t_num})
+        if action:
+            actions.append(action)
+        if action and action.ok:
+            return f"Closed dining session on Table T{t_num}. The table is now in CLEANING state.", actions
+        return f"Could not close Table T{t_num}: {res.get('error')}", actions
+
+    # 7. Shift Stats & Analytics
+    if re.search(r"\b(shift\s+stats|shift\s+report|how\s+are\s+we\s+doing|today'?s\s+performance|daily\s+stats|revenue)\b", lower):
+        stats = _tool_shift_stats(db, user, {})
+        return (
+            f"**Shift Summary for Today ({stats['date']})**:\n"
+            f"• **Seated Parties**: {stats['seatedParties']} ({stats['covers']} total covers)\n"
+            f"• **Orders Placed**: {stats['ordersToday']}\n"
+            f"• **Paid Revenue**: ${stats['paidRevenueToday']:.2f}\n\n"
+            f"{_availability_answer(db)}",
+            [],
+        )
+
+    # 8. List Reservations
+    if re.search(r"\b(?:list|show|view|check|get|any)\s+(?:all\s+)?reservations?\b", lower) or lower == "reservations":
+        res_data = _tool_list_reservations(db, user, {})
+        items = res_data.get("reservations", [])
+        if not items:
+            return "There are currently no upcoming reservations on file.", []
+        lines = [
+            f"• **{r['guest']}** (party of {r['partySize']}) at **{r['table']}** — {r['time']} [{r['status']}]"
+            for r in items
+        ]
+        return "Here are the upcoming reservations:\n" + "\n".join(lines), []
+
+    # 9. Book Reservation
+    # e.g. "reserve T3 for Sarah at 7:00pm", "reserve table 2 for Alex party of 4 at 8pm"
+    res_match = re.search(
+        r"\breserve\s+(?:table\s+|t)?([a-zA-Z0-9]+)\s+for\s+([A-Za-z\s]+?)(?:\s+(?:party\s+of\s+|pax\s+)(\d+))?\s+(?:at\s+)([0-9:apmAPM\s]+)",
+        text,
+        re.IGNORECASE,
+    )
+    if res_match:
+        t_raw, guest, party, when_str = res_match.groups()
+        t_num = t_raw.upper().lstrip("T")
+        p_size = int(party or 2)
+        res, action = _execute_tool(
+            db, user, "reserve_table",
+            {"table_number": t_num, "guest_name": guest.strip(), "party_size": p_size, "time": when_str.strip()}
+        )
+        if action:
+            actions.append(action)
+        if action and action.ok:
+            return f"Reservation confirmed! Reserved Table T{t_num} for {guest.strip()} (party of {p_size}) at {when_str.strip()}.", actions
+        return f"Could not reserve Table T{t_num}: {res.get('error')}", actions
+
+    # 10. Cancel Reservation
+    cancel_res_match = re.search(
+        r"\bcancel\s+reservation\s+(?:for\s+([a-zA-Z\s]+)|(?:on|at)\s+(?:table\s+|t)?([a-zA-Z0-9]+))",
+        lower,
+    )
+    if cancel_res_match:
+        guest, t_raw = cancel_res_match.groups()
+        args: dict[str, Any] = {}
+        if guest:
+            args["guest_name"] = guest.strip()
+        if t_raw:
+            args["table_number"] = t_raw.upper().lstrip("T")
+        res, action = _execute_tool(db, user, "cancel_reservation", args)
+        if action:
+            actions.append(action)
+        if action and action.ok:
+            return f"Reservation cancelled: {res.get('summary')}", actions
+        return f"Could not cancel reservation: {res.get('error')}", actions
+
+    # 11. Menu: 86 / Un-86 / Price
+    un86_match = (
+        re.search(r"\bmake\s+([a-zA-Z0-9\s]+?)\s+available\b", lower)
+        or re.search(r"\b(?:un-86|un86|enable|make\s+available|back\s+on\s+menu)\s+([a-zA-Z0-9\s]+)$", lower)
+    )
+    if un86_match:
+        dish = un86_match.group(1).strip()
+        res, action = _execute_tool(db, user, "set_menu_item", {"item_name": dish, "available": True})
+        if action:
+            actions.append(action)
+        if action and action.ok:
+            return f"**{dish.title()}** is back in stock and available on POS and guest menus.", actions
+        return f"Could not update menu item '{dish}': {res.get('error')}", actions
+
+    mark86_match = (
+        re.search(r"\bmake\s+([a-zA-Z0-9\s]+?)\s+unavailable\b", lower)
+        or re.search(r"\b(?:86|disable|out\s+of\s+stock)\s+([a-zA-Z0-9\s]+)$", lower)
+    )
+    if mark86_match:
+        dish = mark86_match.group(1).strip()
+        res, action = _execute_tool(db, user, "set_menu_item", {"item_name": dish, "available": False})
+        if action:
+            actions.append(action)
+        if action and action.ok:
+            return f"I've 86'd **{dish.title()}** — it is now marked unavailable across POS and customer views.", actions
+        return f"Could not 86 '{dish}': {res.get('error')}", actions
+
+    price_match = re.search(r"\b(?:set|change|update)\s+price\s+of\s+([a-zA-Z0-9\s]+?)\s+to\s+\$?([0-9.]+)", lower)
+    if price_match:
+        dish, pr = price_match.groups()
+        res, action = _execute_tool(db, user, "set_menu_item", {"item_name": dish.strip(), "price": float(pr)})
+        if action:
+            actions.append(action)
+        if action and action.ok:
+            return f"Updated price of **{dish.strip().title()}** to ${float(pr):.2f}.", actions
+        return f"Could not update price for '{dish}': {res.get('error')}", actions
+
+    if re.search(r"\b(?:show|list|view|what\s+is\s+on\s+the)\s+menu\b", lower) or lower == "menu":
+        items = _tool_list_menu(db, user, {}).get("menu", [])
+        if not items:
+            return "No menu items found in the system.", []
+        lines = [
+            f"• **{i['name']}** (${float(i['price']):.2f}) — {i['category']}" + (" *(86'd)*" if not i["available"] else "")
+            for i in items[:20]
+        ]
+        return f"Here is the active menu ({len(items)} items):\n" + "\n".join(lines), []
+
+    # 12. Staff Alerts
+    # e.g. "alert waiter table 4 needs water", "notify kitchen order delayed"
+    alert_match = re.search(r"\b(?:alert|notify|tell)\s+(waiters?|hosts?|managers?|kitchen|chefs?)\s*[:-]?\s*(.+)", text, re.IGNORECASE)
+    if alert_match:
+        target, msg = alert_match.groups()
+        t_clean = target.upper().rstrip("S")
+        if t_clean in ("KITCHEN", "CHEF"):
+            t_clean = "CHEF"
+        elif t_clean in ("WAITER", "HOST", "MANAGER", "OWNER"):
+            pass
+        else:
+            t_clean = "WAITER"
+        res, action = _execute_tool(db, user, "send_alert", {"target_role": t_clean, "message": msg.strip()})
+        if action:
+            actions.append(action)
+        if action and action.ok:
+            return f"Staff alert broadcasted to {t_clean.lower()}s: \"{msg.strip()}\"", actions
+        return f"Could not send alert: {res.get('error')}", actions
+
+    # 13. Specific Table Inquiry
+    # e.g. "who is at table 1?", "check T4", "status of table 2"
+    t_inq_match = re.search(r"\b(?:who\s+is\s+at|status\s+of|check|what\s+about)\s+(?:table\s+|t)?([a-zA-Z0-9]+)\b", lower)
+    if t_inq_match:
+        t_num = t_inq_match.group(1).upper().lstrip("T")
+        try:
+            table = _find_table(db, t_num)
+            session = table_service.active_session_for_table(db, table.id)
+            if session:
+                return (
+                    f"Table T{table.number} (seats {table.capacity}, {table.type.lower()}) is currently **{table.status}**.\n"
+                    f"Active dining guest: **{session.guest_name or 'Walk-in'}** (party of {session.party_size}), seated at "
+                    f"{session.seated_at.strftime('%H:%M') if session.seated_at else 'recently'}.",
+                    [],
+                )
+            return (
+                f"Table T{table.number} (seats {table.capacity}, {table.type.lower()}) is currently **{table.status}** with no active dining session.",
+                [],
+            )
+        except Exception as e:
+            return str(e), []
+
+    # 14. Party size recommendation
+    party_match = re.search(r"(?:party|group|table)\s*(?:of|for)\s*(\d+)|(\d+)\s*(?:people|guests|pax)", lower)
     if party_match:
         size = int(party_match.group(1) or party_match.group(2))
-        return _party_fit_answer(db, size)
+        return _party_fit_answer(db, size), []
 
-    if _AVAILABILITY_WORDS.search(text):
-        return _availability_answer(db)
+    # 15. Availability check
+    if _AVAILABILITY_WORDS.search(lower):
+        return _availability_answer(db), []
 
+    # 16. Fallback Snapshot
     tables = db.query(Table).order_by(Table.number).all()
     by_status: dict[str, list[str]] = {}
     for t in tables:
         by_status.setdefault(t.status, []).append(f"T{t.number}")
     lines = [f"{status.title()}: {', '.join(nums)}" for status, nums in sorted(by_status.items())]
+
     return (
-        "I'm running in offline mode right now (no AI model connected). "
-        "Here's the current floor snapshot — " + "; ".join(lines) + ". "
-        "You can add a Groq API key in your .env file (GROQ_API_KEY=...) to enable "
-        "full conversational AI with natural language commands."
+        f"Floor Status Snapshot — {'; '.join(lines)}.\n\n"
+        "You can tell me to:\n"
+        "• *\"Seat a party of 4 at T5\"*\n"
+        "• *\"Clean table 2\"* or *\"Make T1 available\"*\n"
+        "• *\"Show reservations\"* or *\"Shift report\"*\n"
+        "• *\"86 Burger\"* or *\"Alert waiter table 3 needs service\"*\n\n"
+        "*(Running in local intelligence mode. To activate open-ended conversational AI, add GROQ_API_KEY in backend/.env)*",
+        [],
     )
 
 
@@ -604,22 +887,30 @@ over floor operations.
 
 
 def chat(db: Session, user: User, messages: list[dict]) -> tuple[str, list[ChatAction]]:
+    last_user_message = next(
+        (str(m.get("content") or "") for m in reversed(messages) if m.get("role") == "user"), ""
+    )
+
+    # Fast-path accuracy guard: plain "which tables are free?" questions
+    # are answered straight from DB to ensure 100% precision.
+    if _availability_question(last_user_message):
+        return _availability_answer(db), []
+
+    # Check if a cloud LLM is active
+    from app.services.groq_llm import get_active_provider
+
+    active_provider = get_active_provider()
+    if not active_provider:
+        # No cloud LLM configured — route through intelligent local engine
+        return _fallback_process(db, user, last_user_message)
+
+    # Cloud LLM is available — run conversational agent loop with tool-calling
     system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
         user_name=user.name,
         user_role=user.role.title(),
         snapshot=build_snapshot(db),
     )
 
-    last_user_message = next(
-        (str(m.get("content") or "") for m in reversed(messages) if m.get("role") == "user"), ""
-    )
-
-    # Accuracy guard: plain "which tables are free?"-style questions are
-    # answered straight from the DB so the model can't misreport statuses.
-    if _availability_question(last_user_message):
-        return _availability_answer(db), []
-
-    # Build the conversation for the LLM
     convo: list[dict] = [{"role": "system", "content": system_prompt}]
     for msg in messages[-12:]:
         role = msg.get("role")
@@ -633,21 +924,19 @@ def chat(db: Session, user: User, messages: list[dict]) -> tuple[str, list[ChatA
     for _round in range(MAX_TOOL_ROUNDS):
         reply_msg = chat_completion(convo, tools=tool_specs, temperature=0.1)
 
-        # If Groq is unavailable, fall back to deterministic answers
+        # If LLM API fails or times out, fall back gracefully to local engine
         if reply_msg is None:
-            return _fallback_reply(db, last_user_message), actions
+            return _fallback_process(db, user, last_user_message)
 
         tool_calls = reply_msg.get("tool_calls") or []
 
         if not tool_calls:
-            # Model gave a final text response
             content = (reply_msg.get("content") or "").strip()
             if content:
                 return content, actions
-            # Empty content — summarize whatever tools did
             if actions:
                 return _summarize_actions(actions), actions
-            return _fallback_reply(db, last_user_message), actions
+            return _fallback_process(db, user, last_user_message)
 
         # Process tool calls
         convo.append(reply_msg)
@@ -669,7 +958,6 @@ def chat(db: Session, user: User, messages: list[dict]) -> tuple[str, list[ChatA
             if action:
                 actions.append(action)
 
-            # OpenAI-compatible format requires tool_call_id
             convo.append({
                 "role": "tool",
                 "tool_call_id": call.get("id", ""),
@@ -679,4 +967,4 @@ def chat(db: Session, user: User, messages: list[dict]) -> tuple[str, list[ChatA
     # Exhausted tool rounds
     if actions:
         return _summarize_actions(actions), actions
-    return _fallback_reply(db, last_user_message), actions
+    return _fallback_process(db, user, last_user_message)

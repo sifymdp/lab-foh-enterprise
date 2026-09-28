@@ -34,20 +34,24 @@ export interface KitchenOrderItem {
 export type KitchenStation =
   | 'ALL'
   | 'MAIN KITCHEN'
-  | 'GRILL'
-  | 'FRY'
+  | 'NORTH INDIAN'
+  | 'SOUTH INDIAN'
+  | 'TANDOOR'
+  | 'CHINESE_WOK'
   | 'PIZZA'
   | 'BAR'
   | 'DESSERT'
-  | 'TANDOOR'
+  | 'GRILL'
+  | 'FRY'
   | 'INDIAN_GRAVY'
   | 'SOUTH_INDIAN'
-  | 'CHINESE_WOK'
+  | 'NORTH_INDIAN'
   | 'CONTINENTAL_GRILL'
   | 'COLD_KITCHEN_SALAD'
   | 'BAKERY_CONFECTIONERY'
   | 'SWEETS_MITHAI'
   | 'BEVERAGE_BAR'
+  | string
 
 export interface CookingTimePrediction {
   estimated_minutes: number
