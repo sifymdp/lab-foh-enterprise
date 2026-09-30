@@ -125,18 +125,18 @@ export function normalizeKitchenOrder(order: Record<string, unknown>): KitchenOr
     served_at: (order.served_at ?? order.servedAt ?? null) as string | null,
     items: Array.isArray(order.items)
       ? order.items.map((item) => {
-          const value = item as Record<string, unknown>
-          return {
-            id: String(value.id ?? ''),
-            item_name: String(value.item_name ?? value.itemName ?? 'Unknown item'),
-            quantity: Number(value.quantity ?? 0),
-            unit_price: Number(value.unit_price ?? value.unitPrice ?? 0),
-            station: (value.station ?? null) as string | null,
-            notes: (value.notes ?? null) as string | null,
-            allergy_flag: Boolean(value.allergy_flag ?? value.allergyFlag ?? false),
-            item_status: (value.item_status ?? value.itemStatus ?? 'RECEIVED') as string,
-          }
-        })
+        const value = item as Record<string, unknown>
+        return {
+          id: String(value.id ?? ''),
+          item_name: String(value.item_name ?? value.itemName ?? 'Unknown item'),
+          quantity: Number(value.quantity ?? 0),
+          unit_price: Number(value.unit_price ?? value.unitPrice ?? 0),
+          station: (value.station ?? null) as string | null,
+          notes: (value.notes ?? null) as string | null,
+          allergy_flag: Boolean(value.allergy_flag ?? value.allergyFlag ?? false),
+          item_status: (value.item_status ?? value.itemStatus ?? 'RECEIVED') as string,
+        }
+      })
       : [],
   }
 }
@@ -552,10 +552,10 @@ export const api = {
     if (USE_MOCK) return Promise.resolve([])
     const query = params
       ? '?' +
-        Object.entries(params)
-          .filter(([_, v]) => v !== undefined && v !== '' && v !== null)
-          .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`)
-          .join('&')
+      Object.entries(params)
+        .filter(([_, v]) => v !== undefined && v !== '' && v !== null)
+        .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`)
+        .join('&')
       : ''
     return apiFetch(`/audit-logs${query}`)
   },
@@ -777,6 +777,24 @@ export const api = {
     })
   },
 
+  updateCamera(cameraId: string, payload: Partial<{
+    name: string
+    stream_url: string
+    source_type: string
+    section: string
+    floor_id: string
+    resolution: string
+    is_online: boolean
+    health_status: string
+    enabled: boolean
+  }>): Promise<any> {
+    if (USE_MOCK) return Promise.resolve({ id: cameraId, ...payload })
+    return apiFetch(`/vision/cameras/${cameraId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    })
+  },
+
   calibrateCamera(cameraId: string, payload: { reference_points: any[]; transformation_matrix?: number[][] }): Promise<any> {
     if (USE_MOCK) return Promise.resolve({})
     return apiFetch(`/vision/cameras/${cameraId}/calibrate`, {
@@ -814,6 +832,95 @@ export const api = {
   getVisionTelemetry(): Promise<any> {
     if (USE_MOCK) return Promise.resolve({ model_name: 'YOLO11', ai_fps: 0, is_ready: false })
     return apiFetch('/vision/telemetry')
+  },
+
+  getVisionSources(): Promise<{ supported_modes: any[]; available_video_files: any[] }> {
+    if (USE_MOCK) return Promise.resolve({ supported_modes: [], available_video_files: [] })
+    return apiFetch('/vision/sources')
+  },
+
+  testVideoSource(payload: { source_type: string; stream_url: string }): Promise<any> {
+    if (USE_MOCK) return Promise.resolve({ success: true, fps: 24, resolution: '1280x720', latency_ms: 45 })
+    return apiFetch('/vision/sources/test', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  },
+
+  getCameraCalibration(cameraId: string): Promise<any> {
+    if (USE_MOCK) return Promise.resolve({ is_calibrated: false })
+    return apiFetch(`/vision/cameras/${cameraId}/calibration`)
+  },
+
+  detectFloorLayout(payload: { camera_id: string; floor_id?: string; override_stream_url?: string; source_type?: string; min_confidence?: number; reconstruct_mode?: boolean }): Promise<any> {
+    if (USE_MOCK) return Promise.resolve({ matched_count: 0, new_count: 0, suggestions: [] })
+    return apiFetch('/vision/floor-plan/detect', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  },
+
+  getFloorPlanSuggestions(floorId: string, status?: string): Promise<any[]> {
+    if (USE_MOCK) return Promise.resolve([])
+    const q = status ? `&status=${status}` : ''
+    return apiFetch(`/vision/floor-plan/suggestions?floor_id=${floorId}${q}`)
+  },
+
+  actionFloorPlanSuggestion(suggestionId: string, payload: { action: string; review_notes?: string; edited_data?: any }): Promise<any> {
+    if (USE_MOCK) return Promise.resolve({})
+    return apiFetch(`/vision/floor-plan/suggestions/${suggestionId}/action`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  },
+
+  applyApprovedFloorPlan(payload: { floor_id: string; suggestion_ids: string[]; replace_existing?: boolean }): Promise<any> {
+    if (USE_MOCK) return Promise.resolve({ success: true, updated_tables: 0 })
+    return apiFetch('/vision/floor-plan/apply', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  },
+
+  clearFloorPlan(floorId: string): Promise<any> {
+    if (USE_MOCK) return Promise.resolve({ success: true, cleared_count: 0 })
+    return apiFetch('/vision/floor-plan/clear', {
+      method: 'POST',
+      body: JSON.stringify({ floor_id: floorId }),
+    })
+  },
+
+  reconstructFloorPlanFromVideo(payload: {
+    camera_id: string
+    floor_id: string
+    override_stream_url?: string
+    source_type?: string
+    min_confidence?: number
+    replace_existing?: boolean
+  }): Promise<any> {
+    if (USE_MOCK) return Promise.resolve({ success: true, created_count: 0 })
+    return apiFetch('/vision/floor-plan/reconstruct', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  },
+
+  getFloorPlanVersions(floorId: string): Promise<any[]> {
+    if (USE_MOCK) return Promise.resolve([])
+    return apiFetch(`/vision/floor-plan/versions?floor_id=${floorId}`)
+  },
+
+  getFloorPlanDrift(floorId: string, cameraId: string, threshold: number = 40.0): Promise<any> {
+    if (USE_MOCK) return Promise.resolve({ has_drift: false, drift_count: 0 })
+    return apiFetch(`/vision/floor-plan/drift?floor_id=${floorId}&camera_id=${cameraId}&drift_threshold=${threshold}`)
+  },
+
+  runVisionBenchmark(payload: { sample_frames?: number; video_source?: string } = {}): Promise<any> {
+    if (USE_MOCK) return Promise.resolve({})
+    return apiFetch('/vision/benchmark', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
   },
 }
 

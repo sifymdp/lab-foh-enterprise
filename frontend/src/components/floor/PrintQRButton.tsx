@@ -16,7 +16,8 @@ interface Props {
 
 export function PrintQRButton({ tableId, tableNumber }: Props) {
   const handleClick = () => {
-    window.open(`${API_URL}/tables/${tableId}/qr`, '_blank')
+    const target = tableNumber ? `by-number/${encodeURIComponent(tableNumber)}` : tableId
+    window.open(`${API_URL}/tables/${target}/qr`, '_blank')
   }
 
   return (

@@ -14,7 +14,8 @@ from app.core.yolo_models import detect_table_state_consensus, iter_full_frame_d
 from app.core.deps import get_current_user, require_floor_editor, require_permission
 from app.core.ids import new_id
 from app.database import get_db
-from app.models import TableQRCode
+from app.models import Table, TableQRCode
+from app.models.session import DiningSession
 from app.models.user import User
 from app.schemas.floor import CreateTableIn, StatusPatchIn, TableOut, TablePatchIn
 from app.schemas.roi import (
@@ -85,29 +86,306 @@ def _resolve_roi_label_from_scene(
     return best_label, best_confidence
 
 
-@router.get("/{table_id}/qr")
-def table_qr_page(table_id: str, db: Session = Depends(get_db)) -> HTMLResponse:
+def resolve_table_and_qr(db: Session, identifier: str) -> tuple[Table, TableQRCode]:
+    """
+    Finds a table by ID or Number (e.g. 'tbl-90ee5c90', '1', 'T1', 'tbl-1') and
+    guarantees an active TableQRCode exists.
+    If the requested table was deleted due to a floor-plan layout change, gracefully
+    resolves to the matching table number or first available active table so QR links never fail.
+    """
+    table = db.query(Table).filter(Table.id == identifier).first()
+    if not table:
+        table = db.query(Table).filter(Table.number == identifier).first()
+    if not table:
+        clean = identifier.replace("tbl-", "").replace("table-", "").lstrip("Tt ")
+        table = db.query(Table).filter(
+            (Table.number == clean)
+            | (Table.number == f"T{clean}")
+            | (Table.number == f"Table {clean}")
+        ).first()
+    if not table:
+        # Fallback to first table on active floor
+        table = db.query(Table).order_by(Table.number.asc()).first()
+    if not table:
+        # Create default Table 1 if floor is completely empty
+        table = Table(
+            id=new_id(),
+            floor_id="floor-1",
+            number="1",
+            capacity=4,
+            status="AVAILABLE",
+            x=100.0,
+            y=100.0,
+            width=85.0,
+            height=85.0,
+            shape="SQUARE",
+        )
+        db.add(table)
+        db.commit()
+        db.refresh(table)
+
     qr = (
         db.query(TableQRCode)
-        .filter(TableQRCode.table_id == table_id, TableQRCode.is_active.is_(True))
+        .filter(TableQRCode.table_id == table.id, TableQRCode.is_active.is_(True))
         .first()
     )
     if not qr:
-        raise HTTPException(404, "QR code not found for table")
-    guest_url = f"{settings.guest_menu_base_url}/guest/menu?token={qr.token}"
-    qr_img = f"https://api.qrserver.com/v1/create-qr-code/?size=240x240&data={quote(guest_url)}"
+        token = f"t{table.number}".lower().replace(" ", "").replace("-", "")
+        existing = db.query(TableQRCode).filter(TableQRCode.token == token).first()
+        if existing:
+            existing.table_id = table.id
+            existing.is_active = True
+            qr = existing
+        else:
+            qr = TableQRCode(
+                id=new_id(),
+                table_id=table.id,
+                token=token,
+                is_active=True,
+            )
+            db.add(qr)
+        db.commit()
+        db.refresh(qr)
+
+    return table, qr
+
+
+@router.get("/by-number/{table_number}/qr")
+def table_qr_by_number_page(table_number: str, db: Session = Depends(get_db)) -> HTMLResponse:
+    return table_qr_page(table_number, db)
+
+
+@router.get("/{table_id}/qr")
+def table_qr_page(table_id: str, db: Session = Depends(get_db)) -> HTMLResponse:
+    table, qr = resolve_table_and_qr(db, table_id)
+
+    # Permanent URL identified by table number so layout changes never break the physical QR
+    guest_url = f"{settings.guest_menu_base_url}/guest/menu?table={table.number}&token={qr.token}"
+    qr_img = f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={quote(guest_url)}"
+
+    # Get other floor tables for quick switching / printing
+    all_tables = (
+        db.query(Table)
+        .filter(Table.floor_id == table.floor_id)
+        .order_by(Table.number.asc())
+        .all()
+    )
+    options_html = "".join(
+        f'<option value="{t.id}" {"selected" if t.id == table.id else ""}>Table {t.number}</option>'
+        for t in all_tables
+    )
+
     html = f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Table QR</title>
-<style>
-  body {{ font-family: system-ui, sans-serif; text-align: center; padding: 40px; }}
-  img {{ border: 8px solid #111; border-radius: 8px; }}
-  p {{ color: #555; margin-top: 16px; word-break: break-all; }}
-</style></head>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Table {table.number} QR Code — FOH Restaurant</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {{
+      --bg: #f8fafc;
+      --card-bg: #ffffff;
+      --primary: #0f172a;
+      --accent: #2563eb;
+      --gold: #d97706;
+      --border: #e2e8f0;
+      --text: #1e293b;
+      --muted: #64748b;
+    }}
+    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }}
+    .no-print-toolbar {{
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 24px;
+      background: #ffffff;
+      padding: 10px 16px;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+      border: 1px solid var(--border);
+    }}
+    .btn {{
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      transition: all 0.15s ease;
+      border: 1px solid transparent;
+    }}
+    .btn-primary {{
+      background: #0f172a;
+      color: #ffffff;
+    }}
+    .btn-primary:hover {{
+      background: #1e293b;
+    }}
+    .btn-outline {{
+      background: #ffffff;
+      color: #334155;
+      border-color: var(--border);
+    }}
+    .btn-outline:hover {{
+      background: #f1f5f9;
+    }}
+    select {{
+      padding: 8px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      font-family: inherit;
+      font-size: 13px;
+      color: #334155;
+      outline: none;
+    }}
+    .stand-card {{
+      background: var(--card-bg);
+      width: 100%;
+      max-width: 420px;
+      border-radius: 20px;
+      border: 2px solid #0f172a;
+      box-shadow: 0 20px 40px -15px rgba(15,23,42,0.12);
+      text-align: center;
+      padding: 36px 32px;
+      position: relative;
+    }}
+    .restaurant-brand {{
+      font-size: 11px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      font-weight: 700;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }}
+    .table-badge {{
+      display: inline-block;
+      background: #0f172a;
+      color: #ffffff;
+      font-family: 'Fraunces', serif;
+      font-size: 28px;
+      font-weight: 700;
+      padding: 6px 24px;
+      border-radius: 100px;
+      margin-bottom: 20px;
+      letter-spacing: -0.02em;
+    }}
+    .qr-frame {{
+      display: inline-block;
+      padding: 16px;
+      background: #ffffff;
+      border: 2px solid #0f172a;
+      border-radius: 16px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+      margin-bottom: 20px;
+    }}
+    .qr-frame img {{
+      display: block;
+      width: 240px;
+      height: 240px;
+      border-radius: 6px;
+    }}
+    .instructions {{
+      font-size: 15px;
+      font-weight: 600;
+      color: #0f172a;
+      margin-bottom: 6px;
+    }}
+    .sub-instructions {{
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 16px;
+    }}
+    .url-box {{
+      font-family: monospace;
+      font-size: 11px;
+      color: #64748b;
+      word-break: break-all;
+      background: #f8fafc;
+      padding: 8px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }}
+    .footer-pill {{
+      margin-top: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #0f172a;
+    }}
+    .footer-pill span {{
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }}
+    @media print {{
+      body {{
+        background: #ffffff;
+        padding: 0;
+        margin: 0;
+      }}
+      .no-print-toolbar {{
+        display: none !important;
+      }}
+      .stand-card {{
+        border: 2px solid #000000;
+        box-shadow: none;
+        max-width: 100%;
+        margin: auto;
+        page-break-inside: avoid;
+      }}
+    }}
+  </style>
+</head>
 <body>
-  <h1>Scan to order</h1>
-  <img src="{qr_img}" alt="QR code" width="240" height="240" />
-  <p>{guest_url}</p>
-</body></html>"""
+  <div class="no-print-toolbar">
+    <button class="btn btn-primary" onclick="window.print()">🖨️ Print Stand</button>
+    <a href="{guest_url}" target="_blank" class="btn btn-outline">🍽️ Test Menu</a>
+    <select onchange="window.location.href='/tables/' + this.value + '/qr'">
+      {options_html}
+    </select>
+  </div>
+
+  <div class="stand-card">
+    <div class="restaurant-brand">FOH Enterprise Dining</div>
+    <div class="table-badge">TABLE {table.number}</div>
+
+    <div class="qr-frame">
+      <img src="{qr_img}" alt="Table {table.number} QR Code" width="240" height="240" />
+    </div>
+
+    <div class="instructions">📱 Scan with Phone Camera</div>
+    <div class="sub-instructions">Browse live menu · Place orders · Pay from table</div>
+
+    <div class="url-box">{guest_url}</div>
+
+    <div class="footer-pill">
+      <span>⚡ Instant Kitchen Sync</span>
+      <span>•</span>
+      <span>💳 UPI / Card / Cash</span>
+    </div>
+  </div>
+</body>
+</html>"""
     return HTMLResponse(html)
 
 

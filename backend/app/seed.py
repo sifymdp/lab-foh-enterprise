@@ -16,6 +16,7 @@ from app.models import (
     Bill,
     Branch,
     CashierShift,
+    CleaningEvent,
     DiningSession,
     Floor,
     MenuItem,
@@ -209,11 +210,11 @@ def seed_database(db: Session) -> None:
         db.add(floor)
         db.flush()
 
-    # Ensure all 10 tables exist and match standard IDs t-1 through t-10
-    for t in INITIAL_FLOOR["tables"]:
-        table = db.get(Table, t["id"])
-        roi = t.get("roiCoords")
-        if not table:
+    # Ensure initial tables exist if the floor has no tables yet
+    existing_floor_tables = db.query(Table).filter(Table.floor_id == floor.id).all()
+    if not existing_floor_tables:
+        for t in INITIAL_FLOOR["tables"]:
+            roi = t.get("roiCoords")
             table = Table(
                 id=t["id"],
                 floor_id=floor.id,
@@ -235,18 +236,13 @@ def seed_database(db: Session) -> None:
             )
             db.add(table)
             db.add(TableQRCode(id=new_id(), table_id=t["id"], token=new_id(), is_active=True))
-        else:
-            table.number = t["number"]
-            table.capacity = t["capacity"]
-            table.type = t["type"]
-            table.shape = t["shape"]
-            table.x = t["x"]
-            table.y = t["y"]
-            table.width = t["width"]
-            table.height = t["height"]
-            table.tenant_id = organization.id
-            table.branch_id = branch.id
-
+    else:
+        # Floor already has tables (e.g. reconstructed from video or edited) - do not stomp over user layout
+        for t in existing_floor_tables:
+            if not t.tenant_id:
+                t.tenant_id = organization.id
+            if not t.branch_id:
+                t.branch_id = branch.id
     db.flush()
 
     # ── 7. Seed Active Cashier Shift for cashier@gmail.com ─────────────────────
@@ -523,7 +519,7 @@ def seed_database(db: Session) -> None:
                 table_id="t-6",
                 guest_name=gname,
                 party_size=2,
-                seated_at=now - dt - timedelta(hours=1),
+                seated_at=now - dt - timedelta(minutes=52),
                 closed_at=now - dt,
                 status="PAID",
                 tenant_id=organization.id,
@@ -532,6 +528,7 @@ def seed_database(db: Session) -> None:
             db.add(s_item)
             db.flush()
         else:
+            s_item.seated_at = now - dt - timedelta(minutes=52)
             s_item.closed_at = now - dt
 
         b_item = db.get(Bill, bid)
@@ -551,7 +548,7 @@ def seed_database(db: Session) -> None:
                 total=amount,
                 status="PAID",
                 bill_status="PAID",
-                generated_at=now - dt - timedelta(minutes=10),
+                generated_at=now - dt - timedelta(minutes=5, seconds=15),
                 paid_at=now - dt,
                 created_by=cashier_user.id if cashier_user else None,
                 tenant_id=organization.id,
@@ -563,7 +560,7 @@ def seed_database(db: Session) -> None:
             b_item.status = "PAID"
             b_item.bill_status = "PAID"
             b_item.paid_at = now - dt
-            b_item.generated_at = now - dt - timedelta(minutes=10)
+            b_item.generated_at = now - dt - timedelta(minutes=5, seconds=15)
 
         p_item = db.get(Payment, pid)
         if not p_item:
@@ -587,6 +584,68 @@ def seed_database(db: Session) -> None:
             p_item.completed_at = now - dt
             p_item.shift_id = "shift-demo-active"
 
+        # Attach order with kitchen prep audit log for today
+        ord_id = f"order-{bid}"
+        o_item = db.get(Order, ord_id)
+        if not o_item:
+            o_item = Order(
+                id=ord_id,
+                session_id=sess_id,
+                table_id="t-6",
+                tenant_id=organization.id,
+                branch_id=branch.id,
+                placed_at=now - dt - timedelta(minutes=44),
+                status="SERVED",
+                source="waiter",
+                approval_status="APPROVED",
+            )
+            db.add(o_item)
+            db.flush()
+            oi = OrderItem(
+                id=f"oi-{ord_id}-1",
+                order_id=ord_id,
+                menu_item_id="menu-biryani-hyd",
+                item_name="Hyderabadi Chicken Dum Biryani",
+                unit_price=Decimal("380.00"),
+                quantity=2,
+            )
+            if not db.get(AuditLog, f"al-ready-{ord_id}"):
+                al = AuditLog(
+                    id=f"al-ready-{ord_id}",
+                    tenant_id=organization.id,
+                    branch_id=branch.id,
+                    action="ORDER_STATUS_CHANGED",
+                    resource_type="order",
+                    resource_id=ord_id,
+                    old_value='{"status": "PREPARING"}',
+                    new_value='{"status": "READY"}',
+                    created_at=now - dt - timedelta(minutes=28),  # 16 min prep
+                )
+                db.add(al)
+
+    # Seed today's completed cleaning events
+    for k in range(5):
+        clean_id = f"clean-today-{k}"
+        ce = db.get(CleaningEvent, clean_id)
+        c_req = now - timedelta(hours=k + 1, minutes=15)
+        c_done = c_req + timedelta(minutes=5, seconds=15)
+        if not ce:
+            ce = CleaningEvent(
+                id=clean_id,
+                table_id=f"t-{(k % 6) + 1}",
+                dining_session_id=None,
+                status="COMPLETED",
+                verified_by_ai=True,
+                ai_confidence=0.95,
+                requested_at=c_req,
+                completed_at=c_done,
+            )
+            db.add(ce)
+        else:
+            ce.status = "COMPLETED"
+            ce.requested_at = c_req
+            ce.completed_at = c_done
+
     # ── 10. Rich Historical Revenue Sample Data ──────────────────────────────
     from random import Random
     rnd = Random(42)
@@ -597,6 +656,7 @@ def seed_database(db: Session) -> None:
         now - timedelta(days=2, hours=1),
         now - timedelta(days=2, hours=4),
         now - timedelta(days=3, hours=3),
+        now - timedelta(days=4, hours=2),
     ]
 
     c_id = cashier_user.id if cashier_user else "u-cashier"
@@ -634,62 +694,114 @@ def seed_database(db: Session) -> None:
             methods_list = ["CASH", "CARD", "UPI", "QR", "ONLINE"]
             for j in range(3):
                 sess_id = f"sess-hist-{i}-{j}"
-                hist_sess = DiningSession(
-                    id=sess_id,
-                    table_id=f"t-{rnd.randint(1, 10)}",
-                    guest_name=f"Guest {i}-{j}",
-                    party_size=rnd.randint(2, 6),
-                    seated_at=shift_date - timedelta(hours=6 - j),
-                    closed_at=shift_date - timedelta(hours=5 - j),
-                    status="PAID",
-                    tenant_id=organization.id,
-                    branch_id=branch.id,
-                )
-                db.add(hist_sess)
-                db.flush()
-
-                bill_val = rnd.randint(500, 2500)
-                disc_val = 0.0
-                if rnd.random() < 0.3:
-                    disc_val = round(bill_val * 0.1, 2)
+                hist_sess = db.get(DiningSession, sess_id)
+                if not hist_sess:
+                    hist_sess = DiningSession(
+                        id=sess_id,
+                        table_id=f"t-{rnd.randint(1, 10)}",
+                        guest_name=f"Guest {i}-{j}",
+                        party_size=rnd.randint(2, 6),
+                        seated_at=shift_date - timedelta(minutes=50),
+                        closed_at=shift_date,
+                        status="PAID",
+                        tenant_id=organization.id,
+                        branch_id=branch.id,
+                    )
+                    db.add(hist_sess)
+                    db.flush()
 
                 bill_id = f"bill-hist-{i}-{j}"
-                hist_bill = Bill(
-                    id=bill_id,
-                    bill_number=f"B{2000 + i*10 + j}",
-                    session_id=sess_id,
-                    subtotal=Decimal(str(bill_val)),
-                    discount_amount=Decimal(str(disc_val)),
-                    service_charge_amount=Decimal(str(round(bill_val * 0.05, 2))),
-                    tax_amount=Decimal(str(round(bill_val * 0.05, 2))),
-                    total=Decimal(str(round(bill_val - disc_val + bill_val * 0.1, 2))),
-                    status="PAID" if j != 2 or i != 1 else "REFUNDED",
-                    bill_status="PAID" if j != 2 or i != 1 else "REFUNDED",
-                    generated_at=shift_date - timedelta(hours=5 - j),
-                    paid_at=shift_date - timedelta(hours=5 - j) if (j != 2 or i != 1) else None,
-                    created_by=c_id if i % 2 == 0 else m_id,
-                    tenant_id=organization.id,
-                    branch_id=branch.id,
-                )
-                db.add(hist_bill)
-                db.flush()
+                hist_bill = db.get(Bill, bill_id)
+                if not hist_bill:
+                    bill_val = rnd.randint(500, 2500)
+                    disc_val = 0.0
+                    if rnd.random() < 0.3:
+                        disc_val = round(bill_val * 0.1, 2)
+                    hist_bill = Bill(
+                        id=bill_id,
+                        bill_number=f"B{2000 + i*10 + j}",
+                        session_id=sess_id,
+                        subtotal=Decimal(str(bill_val)),
+                        discount_amount=Decimal(str(disc_val)),
+                        service_charge_amount=Decimal(str(round(bill_val * 0.05, 2))),
+                        tax_amount=Decimal(str(round(bill_val * 0.05, 2))),
+                        total=Decimal(str(round(bill_val - disc_val + bill_val * 0.1, 2))),
+                        status="PAID" if j != 2 or i != 1 else "REFUNDED",
+                        bill_status="PAID" if j != 2 or i != 1 else "REFUNDED",
+                        generated_at=shift_date - timedelta(minutes=4, seconds=45),
+                        paid_at=shift_date if (j != 2 or i != 1) else None,
+                        created_by=c_id if i % 2 == 0 else m_id,
+                        tenant_id=organization.id,
+                        branch_id=branch.id,
+                    )
+                    db.add(hist_bill)
+                    db.flush()
 
-                m_used = methods_list[(i + j) % len(methods_list)]
-                hist_pay = Payment(
-                    id=f"pay-hist-{i}-{j}",
-                    bill_id=bill_id,
-                    method=m_used,
-                    amount=hist_bill.total,
-                    transaction_id=f"TXN-{m_used}-{i}{j}9837",
-                    payment_status="SUCCESS",
-                    created_by=c_id if i % 2 == 0 else m_id,
-                    paid_at=shift_date - timedelta(hours=5 - j),
-                    completed_at=shift_date - timedelta(hours=5 - j),
-                    shift_id=sh_id,
-                    tenant_id=organization.id,
-                    branch_id=branch.id,
-                )
-                db.add(hist_pay)
+                pay_id = f"pay-hist-{i}-{j}"
+                if not db.get(Payment, pay_id):
+                    m_used = methods_list[(i + j) % len(methods_list)]
+                    hist_pay = Payment(
+                        id=pay_id,
+                        bill_id=bill_id,
+                        method=m_used,
+                        amount=hist_bill.total,
+                        transaction_id=f"TXN-{m_used}-{i}{j}9837",
+                        payment_status="SUCCESS",
+                        created_by=c_id if i % 2 == 0 else m_id,
+                        paid_at=shift_date,
+                        completed_at=shift_date,
+                        shift_id=sh_id,
+                        tenant_id=organization.id,
+                        branch_id=branch.id,
+                    )
+                    db.add(hist_pay)
+
+                # Historical order & prep time audit
+                h_ord_id = f"order-hist-{i}-{j}"
+                if not db.get(Order, h_ord_id):
+                    h_order = Order(
+                        id=h_ord_id,
+                        session_id=sess_id,
+                        table_id=hist_sess.table_id,
+                        tenant_id=organization.id,
+                        branch_id=branch.id,
+                        placed_at=shift_date - timedelta(minutes=42),
+                        status="SERVED",
+                        source="waiter",
+                        approval_status="APPROVED",
+                    )
+                    db.add(h_order)
+                    db.flush()
+
+                al_id = f"al-hist-{i}-{j}"
+                if not db.get(AuditLog, al_id):
+                    al_h = AuditLog(
+                        id=al_id,
+                        tenant_id=organization.id,
+                        branch_id=branch.id,
+                        action="ORDER_STATUS_CHANGED",
+                        resource_type="order",
+                        resource_id=h_ord_id,
+                        old_value='{"status": "PREPARING"}',
+                        new_value='{"status": "READY"}',
+                        created_at=shift_date - timedelta(minutes=28),  # 14 min
+                    )
+                    db.add(al_h)
+
+                # Historical cleaning event
+                h_clean_id = f"clean-hist-{i}-{j}"
+                if not db.get(CleaningEvent, h_clean_id):
+                    h_clean = CleaningEvent(
+                        id=h_clean_id,
+                        table_id=hist_sess.table_id,
+                        dining_session_id=None,
+                        status="COMPLETED",
+                        verified_by_ai=True,
+                        ai_confidence=0.94,
+                        requested_at=shift_date - timedelta(minutes=6),
+                        completed_at=shift_date - timedelta(minutes=1, seconds=10),
+                    )
+                    db.add(h_clean)
 
     db.commit()
 

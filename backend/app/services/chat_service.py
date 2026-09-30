@@ -528,6 +528,51 @@ def _availability_question(text: str) -> bool:
     return bool(_AVAILABILITY_WORDS.search(t) and _TABLE_WORDS.search(t))
 
 
+def _extract_table_number(text: str) -> str | None:
+    """
+    Extract table number from natural language input with high precision.
+    Prevents false matches on words like 'to', 'for', 'the', 'at', 'a'.
+    """
+    # 1. Matches "table 1", "table #1", "tbl 2", "table t1", "table-1"
+    m = re.search(r"\b(?:table|tbl)\s*#?\s*t?([0-9]+)\b", text, re.IGNORECASE)
+    if m:
+        return m.group(1)
+
+    # 2. Matches "t1", "t2", "t10", "t-1", "t#1" (preceded by boundary or punctuation)
+    m = re.search(r"(?:^|[\s,.:;?!/(])t[-#]?([0-9]+)\b", text, re.IGNORECASE)
+    if m:
+        return m.group(1)
+
+    # 3. Matches "to 1", "for 1", "at 1", "on 1"
+    m = re.search(r"\b(?:to|for|at|on)\s+t?#?([0-9]+)\b", text, re.IGNORECASE)
+    if m:
+        return m.group(1)
+
+    # 4. Spelled numbers: "table one", "table two", etc.
+    word_map = {
+        "one": "1", "two": "2", "three": "3", "four": "4", "five": "5",
+        "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10",
+        "eleven": "11", "twelve": "12",
+    }
+    for word, num in word_map.items():
+        if re.search(rf"\b(?:table|tbl|t)\s+{word}\b", text, re.IGNORECASE):
+            return num
+
+    # 5. Command + bare number: e.g. "bill 1", "clean 2", "free 3", "seat 4 at 1"
+    m = re.search(r"\b(?:bill|clean|free|seat|close|mark|clear|bus|settle|paid)\s+t?#?([0-9]+)\b", text, re.IGNORECASE)
+    if m:
+        return m.group(1)
+
+    # 6. Alphanumeric tables if explicitly prefixed with table: "table A1"
+    m = re.search(r"\b(?:table|tbl)\s+([a-zA-Z0-9]+)\b", text, re.IGNORECASE)
+    if m:
+        val = m.group(1).upper().lstrip("T")
+        if val not in ("THE", "A", "AN", "TO", "FOR", "NOW", "PLEASE", "ALL", "NEW", "AS"):
+            return val
+
+    return None
+
+
 def _fallback_process(db: Session, user: User, message: str) -> tuple[str, list[ChatAction]]:
     """Intelligent local natural language engine.
 
@@ -548,8 +593,8 @@ def _fallback_process(db: Session, user: User, message: str) -> tuple[str, list[
             "I can monitor floor status, seat guests, manage reservations, update menu items, and send alerts.\n\n"
             "**Quick commands you can try:**\n"
             "• *\"Seat party of 4 at T5\"* or *\"Seat John party of 2 at T1\"*\n"
+            "• *\"Send bill to T1\"* or *\"Mark T1 as paid\"*\n"
             "• *\"Clean table 2\"* or *\"Make T1 available\"*\n"
-            "• *\"Bill table 3\"* or *\"Close table 4\"*\n"
             "• *\"Reserve T3 for Sarah party of 4 at 7:30 PM\"*\n"
             "• *\"Show reservations\"* or *\"Show menu\"*\n"
             "• *\"86 Ribeye Steak\"* or *\"Make Ribeye Steak available\"*\n"
@@ -559,100 +604,126 @@ def _fallback_process(db: Session, user: User, message: str) -> tuple[str, list[
             [],
         )
 
-    # 2. Seating Walk-ins / Guests
-    # e.g. "seat party of 4 at T5", "seat 2 at table 1", "seat Alice party of 3 at T4", "seat T5"
-    seat_match = (
-        re.search(r"\bseat\s+([A-Za-z]+)\s+(?:party\s+of\s+|pax\s+)?(\d+)\s+(?:at|for|on)\s+(?:table\s+|t)?([a-zA-Z0-9]+)\b", lower)
-        or re.search(r"\bseat\s+(?:a\s+)?(?:party\s+of\s+)?(\d+)(?:\s+(?:guests|people|pax))?(?:\s+(?:at|on|for))?\s+(?:table\s+|t)?([a-zA-Z0-9]+)\b", lower)
-        or re.search(r"\bseat\s+(?:table\s+|t)?([a-zA-Z0-9]+)\s+(?:with\s+)?(?:party\s+of\s+)?(\d+)\b", lower)
+    # 2. Bill Table (e.g. "sent bill to t1", "send bill to t1", "bill table 2", "checkout t1", "print bill for t3")
+    is_bill = bool(
+        re.search(r"\b(bill|billing|check|checkout|invoice|payment\s+request|send\s+bill|sent\s+bill|give\s+bill|print\s+bill)\b", lower)
+        and not re.search(r"\b(shift|revenue|stats|report|cancel|paid)\b", lower)
     )
-    if seat_match:
-        groups = seat_match.groups()
-        if len(groups) == 3 and not groups[0].isdigit():
-            # seat [Name] [party_size] [table]
-            guest_name = groups[0].title()
-            party_size = int(groups[1])
-            table_raw = groups[2]
-        elif len(groups) == 2 and groups[0].isdigit():
-            # seat [party_size] [table]
-            guest_name = "Walk-in"
-            party_size = int(groups[0])
-            table_raw = groups[1]
-        elif len(groups) == 2 and not groups[0].isdigit():
-            # seat [table] [party_size]
-            guest_name = "Walk-in"
-            table_raw = groups[0]
-            party_size = int(groups[1])
-        else:
-            guest_name = "Walk-in"
-            party_size = 2
-            table_raw = groups[0]
-
-        res, action = _execute_tool(
-            db, user, "seat_party",
-            {"table_number": table_raw, "party_size": party_size, "guest_name": guest_name}
+    if is_bill:
+        t_num = _extract_table_number(lower)
+        if t_num:
+            res, action = _execute_tool(db, user, "set_table_status", {"table_number": t_num, "status": "BILLING"})
+            if action:
+                actions.append(action)
+            if action and action.ok:
+                return (
+                    f"Done! Table T{t_num} has been set to BILLING. "
+                    "The bill has been sent and is ready for payment (Cash, Card, or QR).",
+                    actions,
+                )
+            return f"Could not set Table T{t_num} to billing: {res.get('error')}", actions
+        return (
+            "Which table would you like to bill? For example: *\"Send bill to T1\"* or *\"Bill table 2\"*.",
+            [],
         )
-        if action:
-            actions.append(action)
-        if action and action.ok:
+
+    # 3. Mark Paid / Payment Received (e.g. "mark t1 as paid", "t1 paid", "payment received for table 2")
+    is_paid = bool(
+        re.search(r"\b(mark\s+paid|mark\s+as\s+paid|paid|payment\s+received|collected\s+cash|settle|settled)\b", lower)
+        and not re.search(r"\b(shift|revenue|stats|report)\b", lower)
+    )
+    if is_paid:
+        t_num = _extract_table_number(lower)
+        if t_num:
+            res, action = _execute_tool(db, user, "set_table_status", {"table_number": t_num, "status": "CLEANING"})
+            if action:
+                actions.append(action)
+            if action and action.ok:
+                return (
+                    f"Payment confirmed for Table T{t_num}! The dining session is completed and the table is now set to CLEANING.",
+                    actions,
+                )
+            return f"Could not mark Table T{t_num} as paid: {res.get('error')}", actions
+        return "Which table would you like to mark as paid? e.g. *\"Mark T1 as paid\"*.", []
+
+    # 4. Clean / Bus Table (e.g. "clean table 2", "clean t2", "bus table 3", "clear t1")
+    is_clean = bool(
+        re.search(r"\b(clean|bus|clear|cleared|dirty)\b", lower)
+        and not re.search(r"\b(menu|item|dish|price)\b", lower)
+    )
+    if is_clean:
+        t_num = _extract_table_number(lower)
+        if t_num:
+            res, action = _execute_tool(db, user, "set_table_status", {"table_number": t_num, "status": "CLEANING"})
+            if action:
+                actions.append(action)
+            if action and action.ok:
+                return f"Table T{t_num} is now marked CLEANING for the busser.", actions
+            return f"Could not set Table T{t_num} to cleaning: {res.get('error')}", actions
+        return "Which table would you like to clean? e.g. *\"Clean table 2\"*.", []
+
+    # 5. Make Table Available / Free (e.g. "make t1 available", "free table 2", "table 3 is open")
+    is_free = bool(
+        re.search(r"\b(make|mark|set|free)\s+.*\b(available|free|open|ready)\b", lower)
+        or re.search(r"\b(?:free\s+table|free\s+t\d+|open\s+table|available\s+table)\b", lower)
+        or re.search(r"\bfree\s+up\s+t?#?\d+\b", lower)
+    )
+    if is_free:
+        t_num = _extract_table_number(lower)
+        if t_num:
+            res, action = _execute_tool(db, user, "set_table_status", {"table_number": t_num, "status": "AVAILABLE"})
+            if action:
+                actions.append(action)
+            if action and action.ok:
+                return f"Table T{t_num} is now marked AVAILABLE and ready for new guests.", actions
+            return f"Could not free Table T{t_num}: {res.get('error')}", actions
+        return "Which table would you like to make available? e.g. *\"Make T1 available\"*.", []
+
+    # 6. Close Table (e.g. "close table 1", "close t1", "wrap up t2")
+    is_close = bool(
+        re.search(r"\b(close|wrap\s+up|finish)\s+(?:table\s+|session\s+|t)?", lower)
+        and not re.search(r"\b(shift|register|drawer|menu)\b", lower)
+    )
+    if is_close:
+        t_num = _extract_table_number(lower)
+        if t_num:
+            res, action = _execute_tool(db, user, "close_table", {"table_number": t_num})
+            if action:
+                actions.append(action)
+            if action and action.ok:
+                return f"Closed dining session on Table T{t_num}. The table is now in CLEANING state.", actions
+            return f"Could not close Table T{t_num}: {res.get('error')}", actions
+        return "Which table would you like to close? e.g. *\"Close table 3\"*.", []
+
+    # 7. Seating Walk-ins / Guests
+    # e.g. "seat party of 4 at T5", "seat 2 at table 1", "seat Alice party of 3 at T4", "seat T5"
+    if re.search(r"\b(seat|seated)\b", lower):
+        t_num = _extract_table_number(lower)
+        if t_num:
+            # Parse party size
+            p_match = re.search(r"\b(?:party\s+of|pax|for|guests?|people)\s*([0-9]+)\b", lower) or re.search(r"\bseat\s+([0-9]+)\b", lower)
+            party_size = int(p_match.group(1)) if p_match else 2
+            # Parse guest name if provided: e.g. "seat Alice at T1"
+            name_match = re.search(r"\bseat\s+([A-Za-z]+)\s+(?:party|at|for|on)\b", text)
+            guest_name = name_match.group(1).title() if name_match and name_match.group(1).lower() not in ("a", "party", "guests", "table", "at", "for") else "Walk-in"
+
+            res, action = _execute_tool(
+                db, user, "seat_party",
+                {"table_number": t_num, "party_size": party_size, "guest_name": guest_name}
+            )
+            if action:
+                actions.append(action)
+            if action and action.ok:
+                return (
+                    f"Done! I've seated {guest_name} (party of {party_size}) at Table T{t_num}. "
+                    "The table is now marked SEATED.",
+                    actions,
+                )
             return (
-                f"Done! I've seated {guest_name} (party of {party_size}) at Table T{table_raw.upper().lstrip('T')}. "
-                "The table is now marked SEATED.",
+                f"Couldn't seat party at Table T{t_num}: {res.get('error', 'unknown error')}. "
+                f"{_availability_answer(db)}",
                 actions,
             )
-        return (
-            f"Couldn't seat party at Table T{table_raw}: {res.get('error', 'unknown error')}. "
-            f"{_availability_answer(db)}",
-            actions,
-        )
-
-    # 3. Clean / Bus Table
-    clean_match = re.search(r"\b(?:clean|bus|clear|cleared)\s+(?:table\s+|t)?([a-zA-Z0-9]+)\b", lower) or re.search(
-        r"\bmark\s+(?:table\s+|t)?([a-zA-Z0-9]+)\s+(?:as\s+)?clean(?:ing)?\b", lower
-    )
-    if clean_match:
-        t_num = clean_match.group(1).upper().lstrip("T")
-        res, action = _execute_tool(db, user, "set_table_status", {"table_number": t_num, "status": "CLEANING"})
-        if action:
-            actions.append(action)
-        if action and action.ok:
-            return f"Table T{t_num} is now set to CLEANING for the busser.", actions
-        return f"Could not set T{t_num} to CLEANING: {res.get('error')}", actions
-
-    # 4. Make Table Available / Free
-    free_match = re.search(
-        r"\b(?:make|mark|set|free)\s+(?:table\s+|t)?([a-zA-Z0-9]+)\s+(?:as\s+)?(?:available|free|open|ready)\b", lower
-    ) or re.search(r"\bfree\s+(?:up\s+)?(?:table\s+|t)?([a-zA-Z0-9]+)\b", lower)
-    if free_match:
-        t_num = free_match.group(1).upper().lstrip("T")
-        res, action = _execute_tool(db, user, "set_table_status", {"table_number": t_num, "status": "AVAILABLE"})
-        if action:
-            actions.append(action)
-        if action and action.ok:
-            return f"Table T{t_num} is now marked AVAILABLE and ready for new guests.", actions
-        return f"Could not free Table T{t_num}: {res.get('error')}", actions
-
-    # 5. Bill Table
-    bill_match = re.search(r"\b(?:bill|print\s+bill\s+for|mark\s+billing)\s+(?:table\s+|t)?([a-zA-Z0-9]+)\b", lower)
-    if bill_match:
-        t_num = bill_match.group(1).upper().lstrip("T")
-        res, action = _execute_tool(db, user, "set_table_status", {"table_number": t_num, "status": "BILLING"})
-        if action:
-            actions.append(action)
-        if action and action.ok:
-            return f"Table T{t_num} has been set to BILLING.", actions
-        return f"Could not set Table T{t_num} to billing: {res.get('error')}", actions
-
-    # 6. Close Table
-    close_match = re.search(r"\bclose\s+(?:table\s+|t)?([a-zA-Z0-9]+)\b", lower)
-    if close_match:
-        t_num = close_match.group(1).upper().lstrip("T")
-        res, action = _execute_tool(db, user, "close_table", {"table_number": t_num})
-        if action:
-            actions.append(action)
-        if action and action.ok:
-            return f"Closed dining session on Table T{t_num}. The table is now in CLEANING state.", actions
-        return f"Could not close Table T{t_num}: {res.get('error')}", actions
 
     # 7. Shift Stats & Analytics
     if re.search(r"\b(shift\s+stats|shift\s+report|how\s+are\s+we\s+doing|today'?s\s+performance|daily\s+stats|revenue)\b", lower):
@@ -785,26 +856,28 @@ def _fallback_process(db: Session, user: User, message: str) -> tuple[str, list[
         return f"Could not send alert: {res.get('error')}", actions
 
     # 13. Specific Table Inquiry
-    # e.g. "who is at table 1?", "check T4", "status of table 2"
-    t_inq_match = re.search(r"\b(?:who\s+is\s+at|status\s+of|check|what\s+about)\s+(?:table\s+|t)?([a-zA-Z0-9]+)\b", lower)
-    if t_inq_match:
-        t_num = t_inq_match.group(1).upper().lstrip("T")
-        try:
-            table = _find_table(db, t_num)
-            session = table_service.active_session_for_table(db, table.id)
-            if session:
+    # e.g. "who is at table 1?", "check T4", "status of table 2", "how is t1 doing", "is t1 available"
+    if re.search(r"\b(?:who\s+is\s+at|status\s+of|check|what\s+about|how\s+is|is\s+t\d+|is\s+table)\b", lower):
+        t_num = _extract_table_number(lower)
+        if t_num:
+            try:
+                table = _find_table(db, t_num)
+                session = table_service.active_session_for_table(db, table.id)
+                if session:
+                    seated_min = _minutes_between(session.seated_at, _now()) or 0
+                    return (
+                        f"**Table T{table.number}** (seats {table.capacity}, {table.type.lower()}) is currently **{table.status}**.\n"
+                        f"• Guest: **{session.guest_name or 'Walk-in'}** (party of {session.party_size})\n"
+                        f"• Seated: ~{round(seated_min)} min ago\n"
+                        f"• Status: {session.status}",
+                        [],
+                    )
                 return (
-                    f"Table T{table.number} (seats {table.capacity}, {table.type.lower()}) is currently **{table.status}**.\n"
-                    f"Active dining guest: **{session.guest_name or 'Walk-in'}** (party of {session.party_size}), seated at "
-                    f"{session.seated_at.strftime('%H:%M') if session.seated_at else 'recently'}.",
+                    f"**Table T{table.number}** (seats {table.capacity}, {table.type.lower()}) is currently **{table.status}** with no active dining session.",
                     [],
                 )
-            return (
-                f"Table T{table.number} (seats {table.capacity}, {table.type.lower()}) is currently **{table.status}** with no active dining session.",
-                [],
-            )
-        except Exception as e:
-            return str(e), []
+            except Exception as e:
+                return str(e), []
 
     # 14. Party size recommendation
     party_match = re.search(r"(?:party|group|table)\s*(?:of|for)\s*(\d+)|(\d+)\s*(?:people|guests|pax)", lower)
@@ -824,13 +897,14 @@ def _fallback_process(db: Session, user: User, message: str) -> tuple[str, list[
     lines = [f"{status.title()}: {', '.join(nums)}" for status, nums in sorted(by_status.items())]
 
     return (
-        f"Floor Status Snapshot — {'; '.join(lines)}.\n\n"
-        "You can tell me to:\n"
+        f"**Floor Status Snapshot**: {'; '.join(lines)}.\n\n"
+        "**Available actions:**\n"
         "• *\"Seat a party of 4 at T5\"*\n"
+        "• *\"Send bill to T1\"* or *\"Mark T1 as paid\"*\n"
         "• *\"Clean table 2\"* or *\"Make T1 available\"*\n"
         "• *\"Show reservations\"* or *\"Shift report\"*\n"
         "• *\"86 Burger\"* or *\"Alert waiter table 3 needs service\"*\n\n"
-        "*(Running in local intelligence mode. To activate open-ended conversational AI, add GROQ_API_KEY in backend/.env)*",
+        "*(Running in Fast Local Engine · Configure GROQ_API_KEY or GEMINI_API_KEY in backend/.env for conversational AI)*",
         [],
     )
 

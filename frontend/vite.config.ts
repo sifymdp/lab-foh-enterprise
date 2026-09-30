@@ -27,6 +27,13 @@ export default defineConfig({
       '/audit-logs': 'http://127.0.0.1:8000',
       '/insights': 'http://127.0.0.1:8000',
       '/vision': 'http://127.0.0.1:8000',
+      '/stream': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+        secure: false,
+        ws: false,
+        timeout: 0,
+      },
       '/health': 'http://127.0.0.1:8000',
       '/ai': 'http://127.0.0.1:8000',
       '/customer': 'http://127.0.0.1:8000',

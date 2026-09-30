@@ -331,6 +331,17 @@ export interface ChatMessage { role: 'user' | 'assistant'; content: string }
 export interface ChatAction { tool: string; summary: string; ok: boolean }
 export interface ChatResponse { reply: string; aiGenerated?: boolean; actions?: ChatAction[] }
 
+export interface AIProviderStatus {
+  connected: boolean
+  provider: string | null
+  model: string | null
+  available_providers?: {
+    groq: boolean
+    gemini: boolean
+    openai: boolean
+  }
+}
+
 export const aiApi = {
   suggestSeating: (partySize: number) =>
     apiFetch<SeatingResponse>('/ai/seating-suggest', {
@@ -344,6 +355,12 @@ export const aiApi = {
     apiFetch<AIEvent>(`/ai/events/${id}/acknowledge`, { method: 'PATCH' }),
   getShiftReport: (date?: string) =>
     apiFetch<ShiftReport>(`/ai/reports/shift${date ? `?date=${date}` : ''}`),
+  getProviderStatus: () => apiFetch<AIProviderStatus>('/ai/provider'),
+  configureKey: (data: { provider: string; api_key: string; model?: string }) =>
+    apiFetch<{ success: boolean; provider: string; model: string; message: string }>('/ai/configure-key', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
   chat: (input: string | ChatMessage[], history: ChatMessage[] = []) => {
     if (Array.isArray(input)) {
       return apiFetch<ChatResponse>('/ai/chat', {

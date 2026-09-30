@@ -203,16 +203,10 @@ def place_order(
         tenant_id = current_user.tenant_id
         branch_id = current_user.branch_id
         body = body.model_copy(update={"source": "waiter", "approval_status": "APPROVED"})
-    elif table_token:
-        qr = (
-            db.query(TableQRCode)
-            .filter(TableQRCode.token == table_token, TableQRCode.is_active.is_(True))
-            .first()
-        )
-        if not qr:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid table token")
-        if body.table_id and body.table_id != qr.table_id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Table mismatch")
+    elif table_token or body.table_id:
+        from app.routers.guest import _resolve_qr
+        identifier = table_token or body.table_id
+        qr = _resolve_qr(db, identifier)
         table = db.query(Table).filter(Table.id == qr.table_id).first()
         if table:
             tenant_id = table.tenant_id

@@ -54,7 +54,9 @@ class ChatOut(CamelModel):
 
 
 class ChatRequest(CamelModel):
-    messages: list[ChatMessage]
+    messages: list[ChatMessage] | None = None
+    message: str | None = None
+    history: list[ChatMessage] = []
 
 
 class ChatAction(CamelModel):

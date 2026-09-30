@@ -38,7 +38,15 @@ from app.models.user_session import UserSession
 from app.models.staff_table_assignment import StaffTableAssignment
 from app.models.system_configuration import SystemConfiguration
 # Vision & CCTV Models
-from app.models.vision import Camera, CameraCalibration, TableROI, VisionObservation, VisionMismatch
+from app.models.vision import (
+    Camera,
+    CameraCalibration,
+    FloorPlanSuggestion,
+    FloorPlanVersion,
+    TableROI,
+    VisionMismatch,
+    VisionObservation,
+)
 
 # Team Member Integrated Models
 from app.models.order_analytics import OrderAnalytics

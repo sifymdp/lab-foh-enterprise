@@ -13,6 +13,7 @@ import { FloorPlanCanvas } from '../components/floor/FloorPlanCanvas'
 import { FloorStatsBar } from '../components/floor/FloorStatsBar'
 import { SeatingSuggestModal } from '../components/floor/SeatingSuggestModal'
 import { StatusLegend } from '../components/floor/StatusLegend'
+import { LiveStreamPopup } from '../components/floor/LiveStreamPopup'
 import { TableDetailPanel } from '../components/floor/TableDetailPanel'
 import { SeatGuestModal } from '../components/floor/SeatGuestModal'
 import { TakeOrderModal } from '../components/floor/TakeOrderModal'
@@ -42,6 +43,7 @@ export function FloorPage() {
   const [confirmReset, setConfirmReset] = useState(false)
   const [mismatches, setMismatches] = useState<any[]>([])
   const [activeMismatchModal, setActiveMismatchModal] = useState<any | null>(null)
+  const [showLiveStream, setShowLiveStream] = useState(false)
 
   const editable = user ? canEditFloor(user.role) : false
   const isHost = user?.role === 'HOST'
@@ -528,6 +530,38 @@ export function FloorPage() {
           </div>
 
           {/* Fullscreen Button matching Image 1 */}
+          {/* Live Stream Toggle (visible in fullscreen) */}
+          {isFullscreen && (
+            <button
+              type="button"
+              className={`floor-fullscreen-btn ${showLiveStream ? 'floor-fullscreen-btn--active' : ''}`}
+              onClick={() => {
+                if (!selectedTable && floor.tables.length > 0) {
+                  setSelection({ type: 'table', id: floor.tables[0].id })
+                  setShowLiveStream(true)
+                } else {
+                  setShowLiveStream((v) => !v)
+                }
+              }}
+              title={showLiveStream ? 'Hide Live Stream' : 'Show Live Stream'}
+            >
+              <svg
+                width="17"
+                height="17"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke={showLiveStream ? '#1d4ed8' : 'currentColor'}
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                style={{ flexShrink: 0 }}
+              >
+                <path d="M23 7l-7 5 7 5V7z" />
+                <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+              </svg>
+              <span>{showLiveStream ? 'Hide Stream' : 'Live Stream'}</span>
+            </button>
+          )}
           <button
             type="button"
             className={`floor-fullscreen-btn ${isFullscreen ? 'floor-fullscreen-btn--active' : ''}`}
@@ -563,7 +597,12 @@ export function FloorPage() {
               statusFilter={statusFilter}
               editable={editable}
               selection={selection}
-              onSelect={setSelection}
+              onSelect={(sel) => {
+                setSelection(sel)
+                if (isFullscreen && sel?.type === 'table') {
+                  setShowLiveStream(true)
+                }
+              }}
               onTableChange={updateTable}
               onSectionChange={handleSectionChange}
               onLabelChange={handleLabelChange}
@@ -605,6 +644,15 @@ export function FloorPage() {
             )}
           </aside>
         </div>
+
+        {/* ── Live Stream Popup (fullscreen only) ── */}
+        {isFullscreen && showLiveStream && (
+          <LiveStreamPopup
+            table={selectedTable ?? null}
+            floorId={floor.id}
+            onClose={() => setShowLiveStream(false)}
+          />
+        )}
 
         {/* ── Modals mounted inside fullscreen wrapper so they appear during fullscreen mode ── */}
         {seatTable && <SeatGuestModal table={seatTable} onClose={() => setSeatTable(null)} />}

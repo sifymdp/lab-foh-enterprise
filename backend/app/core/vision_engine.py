@@ -51,6 +51,77 @@ class TableZoneMatch:
 
 
 @dataclass
+class FrameQuality:
+    brightness: float          # 0-255 mean pixel intensity
+    contrast: float            # standard deviation of gray channel
+    blur_score: float          # Laplacian variance
+    is_blurred: bool           # blur_score < 55
+    is_low_light: bool         # brightness < 45
+    is_low_contrast: bool      # contrast < 25
+    quality_status: str        # GOOD | LOW_LIGHT | BLURRED | LOW_CONTRAST
+    quality_score: float       # normalized 0.0 - 1.0
+
+
+def assess_frame_quality(frame: np.ndarray) -> FrameQuality:
+    if frame is None or frame.size == 0:
+        return FrameQuality(0.0, 0.0, 0.0, True, True, True, "OFFLINE", 0.0)
+
+    try:
+        small = cv2.resize(frame, (320, 180), interpolation=cv2.INTER_NEAREST)
+        gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+
+        mean_b = float(np.mean(gray))
+        std_c = float(np.std(gray))
+        lap_var = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+
+        is_low_light = mean_b < 45.0
+        is_low_contrast = std_c < 25.0
+        is_blur = lap_var < 55.0
+
+        b_score = min(1.0, mean_b / 100.0) if mean_b < 100 else max(0.0, 1.0 - (mean_b - 200) / 55.0)
+        c_score = min(1.0, std_c / 50.0)
+        blur_score_norm = min(1.0, lap_var / 150.0)
+        overall_score = round(float(0.35 * b_score + 0.35 * c_score + 0.30 * blur_score_norm), 2)
+
+        status = "GOOD"
+        if is_low_light:
+            status = "LOW_LIGHT"
+        elif is_blur:
+            status = "BLURRED"
+        elif is_low_contrast:
+            status = "LOW_CONTRAST"
+
+        return FrameQuality(
+            brightness=round(mean_b, 1),
+            contrast=round(std_c, 1),
+            blur_score=round(lap_var, 1),
+            is_blurred=is_blur,
+            is_low_light=is_low_light,
+            is_low_contrast=is_low_contrast,
+            quality_status=status,
+            quality_score=overall_score,
+        )
+    except Exception:
+        return FrameQuality(128.0, 50.0, 100.0, False, False, False, "GOOD", 0.85)
+
+
+def enhance_low_light(frame: np.ndarray) -> np.ndarray:
+    """
+    Lightweight CLAHE enhancement on luminance channel.
+    Only executed when frame brightness is low (< 45).
+    """
+    if frame is None or frame.size == 0:
+        return frame
+    try:
+        ycrcb = cv2.cvtColor(frame, cv2.COLOR_BGR2YCrCb)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        ycrcb[:, :, 0] = clahe.apply(ycrcb[:, :, 0])
+        return cv2.cvtColor(ycrcb, cv2.COLOR_YCrCb2BGR)
+    except Exception:
+        return frame
+
+
+@dataclass
 class VisionFrameResult:
     tracks: list[PersonTrack]
     table_matches: dict[str, TableZoneMatch]  # table_id -> TableZoneMatch
@@ -58,6 +129,7 @@ class VisionFrameResult:
     fps: float
     total_people_detected: int
     total_people_tracked: int
+    quality: FrameQuality = field(default_factory=lambda: FrameQuality(128.0, 50.0, 100.0, False, False, False, "GOOD", 0.85))
 
 
 class VisionEngine:
@@ -70,6 +142,7 @@ class VisionEngine:
         self._last_inference_time: float = 0.0
         self._fps_history: list[float] = []
         self._model_path: str = ""
+        self._tracker: str = getattr(settings, "cv_tracker", "bytetrack.yaml") or "bytetrack.yaml"
         self._init_engine()
 
     @classmethod
@@ -206,14 +279,21 @@ class VisionEngine:
                 fps=0.0,
                 total_people_detected=0,
                 total_people_tracked=0,
+                quality=assess_frame_quality(frame),
             )
 
-        # Run YOLO11 tracking (classes=[0] is 'person' in COCO dataset)
+        # 1. Evaluate image quality (blur, low light, contrast)
+        quality = assess_frame_quality(frame)
+        if quality.is_low_light:
+            frame = enhance_low_light(frame)
+
+        # 2. Run YOLO11 tracking (classes=[0] is 'person' in COCO dataset)
         try:
+            tracker_file = self._tracker or settings.cv_tracker or "bytetrack.yaml"
             results = self.model.track(
                 frame,
                 persist=True,
-                tracker=settings.cv_tracker,
+                tracker=tracker_file,
                 conf=settings.cv_confidence_threshold,
                 classes=[0],
                 imgsz=settings.cv_img_size,
@@ -229,6 +309,7 @@ class VisionEngine:
                 fps=0.0,
                 total_people_detected=0,
                 total_people_tracked=0,
+                quality=quality,
             )
 
         elapsed_ms = (time.perf_counter() - start_time) * 1000.0
@@ -292,7 +373,19 @@ class VisionEngine:
             fps=round(fps, 1),
             total_people_detected=len(tracks),
             total_people_tracked=len([t for t in tracks if t.track_id >= 0]),
+            quality=quality,
         )
+
+    def set_tracker(self, tracker_name: str) -> None:
+        """Sets tracking algorithm: 'bytetrack' or 'botsort'"""
+        if "botsort" in tracker_name.lower():
+            self._tracker = "botsort.yaml"
+        else:
+            self._tracker = "bytetrack.yaml"
+        logger.info("VisionEngine tracker updated to %s", self._tracker)
+
+    def get_tracker(self) -> str:
+        return self._tracker
 
 
 vision_engine = VisionEngine.get_instance()

@@ -191,6 +191,28 @@ def migrate_schema() -> None:
             for sql in alters:
                 conn.execute(text(sql))
 
+        cam_rows = conn.execute(text("PRAGMA table_info(cameras)")).fetchall()
+        cam_cols = {row[1] for row in cam_rows}
+        if cam_rows:
+            if "source_type" not in cam_cols:
+                conn.execute(text("ALTER TABLE cameras ADD COLUMN source_type VARCHAR(32) DEFAULT 'RTSP'"))
+            if "is_online" not in cam_cols:
+                conn.execute(text("ALTER TABLE cameras ADD COLUMN is_online BOOLEAN DEFAULT 1"))
+            if "health_status" not in cam_cols:
+                conn.execute(text("ALTER TABLE cameras ADD COLUMN health_status VARCHAR(32) DEFAULT 'ONLINE'"))
+
+        sug_rows = conn.execute(text("PRAGMA table_info(floor_plan_ai_suggestions)")).fetchall()
+        sug_cols = {row[1] for row in sug_rows}
+        if sug_rows:
+            for col, typedef in [
+                ("suggested_label", "VARCHAR(64)"),
+                ("detected_position", "TEXT"),
+                ("drift_distance", "FLOAT"),
+                ("review_notes", "TEXT"),
+            ]:
+                if col not in sug_cols:
+                    conn.execute(text(f"ALTER TABLE floor_plan_ai_suggestions ADD COLUMN {col} {typedef}"))
+
         conn.commit()
 
 

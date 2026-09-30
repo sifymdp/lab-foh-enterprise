@@ -78,7 +78,7 @@ export function AppShell() {
       const next = !prev
       try {
         localStorage.setItem('foh_sidebar_collapsed', String(next))
-      } catch {}
+      } catch { }
       return next
     })
   }
@@ -162,8 +162,8 @@ export function AppShell() {
     const overrides = { to: '/overrides', label: 'Overrides & History', icon: '🛡' }
     const staffSessions = { to: '/staff-sessions', label: 'Active Sessions', icon: '💻' }
     const settings = { to: '/settings', label: 'Settings & Rules', icon: '⚙' }
-    const audit    = { to: '/audit-logs', label: 'Audit Trail',         icon: '◎' }
-    const insights = { to: '/insights',   label: 'Operational Insights', icon: '🧠' }
+    const audit = { to: '/audit-logs', label: 'Audit Trail', icon: '◎' }
+    const insights = { to: '/insights', label: 'Operational Insights', icon: '🧠' }
 
     const items: NavItem[] = []
 

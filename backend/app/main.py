@@ -1,4 +1,5 @@
 import logging
+import signal
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -60,10 +61,25 @@ async def lifespan(_app: FastAPI):
     if models_loaded:
         camera_worker.start_worker()
     yield
-    stream.stop_all_stream_workers()
-    await camera_worker.stop_worker()
-    camera_utils.release_captures()
-    unload_models()
+    # ── Graceful shutdown ──
+    # Stop stream workers first to prevent CancelledError cascades
+    # from active StreamingResponse connections during shutdown.
+    try:
+        stream.stop_all_stream_workers()
+    except Exception:
+        pass
+    try:
+        await camera_worker.stop_worker()
+    except Exception:
+        pass
+    try:
+        camera_utils.release_captures()
+    except Exception:
+        pass
+    try:
+        unload_models()
+    except Exception:
+        pass
 
 
 app = FastAPI(title="FOH Table Management API", version="1.0.0", lifespan=lifespan)

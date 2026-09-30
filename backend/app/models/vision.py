@@ -37,6 +37,9 @@ class Camera(Base):
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     section: Mapped[str | None] = mapped_column(String(64), nullable=True)  # e.g., "Indoor", "Patio"
     stream_url: Mapped[str] = mapped_column(String(500), nullable=False)    # RTSP, webcam index "0", or video file path
+    source_type: Mapped[str] = mapped_column(String(32), default="RTSP")    # RTSP | ONVIF | WEBCAM | VIDEO_FILE | DEMO_STREAM | SYNTHETIC
+    is_online: Mapped[bool] = mapped_column(Boolean, default=True)
+    health_status: Mapped[str] = mapped_column(String(32), default="ONLINE")  # ONLINE | OFFLINE | CONNECTING | LOW_FPS | FRAME_TIMEOUT | VISION_ERROR
     resolution: Mapped[str | None] = mapped_column(String(32), default="1280x720")
     fps: Mapped[float] = mapped_column(Float, default=15.0)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -57,6 +60,9 @@ class Camera(Base):
     )
     mismatches: Mapped[list["VisionMismatch"]] = relationship(
         "VisionMismatch", back_populates="camera", cascade="all, delete-orphan"
+    )
+    suggestions: Mapped[list["FloorPlanSuggestion"]] = relationship(
+        "FloorPlanSuggestion", back_populates="camera", cascade="all, delete-orphan"
     )
 
 
@@ -180,3 +186,74 @@ class VisionMismatch(Base):
     camera: Mapped["Camera"] = relationship("Camera", back_populates="mismatches")
     table: Mapped["Table"] = relationship("Table")  # noqa: F821
     verified_by: Mapped["User | None"] = relationship("User", foreign_keys=[verified_by_user_id])  # noqa: F821
+
+
+class FloorPlanSuggestion(Base):
+    """
+    AI-detected candidate table or position change proposed from video observation.
+    Requires manager review and approval before database commit.
+    """
+    __tablename__ = "floor_plan_ai_suggestions"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("organizations.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    branch_id: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("branches.id", ondelete="SET NULL"), index=True, nullable=True
+    )
+    camera_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("cameras.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    floor_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("floors.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    # MATCHED | POSITION_CHANGE | SIZE_CHANGE | NEW_TABLE | REMOVED_TABLE | UNCERTAIN
+    suggestion_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    existing_table_id: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("tables.id", ondelete="SET NULL"), nullable=True
+    )
+    table_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    suggested_label: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    current_position: Mapped[str | None] = mapped_column(Text, nullable=True)
+    suggested_position: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # JSON: {"x": 340, "y": 210, "width": 120, "height": 80, "shape": "RECTANGLE", "shape_confidence": 0.91}
+    detected_position: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # JSON: {"x": 120, "y": 80, "width": 240, "height": 160} in camera pixel space
+    camera_bbox: Mapped[str | None] = mapped_column(Text, nullable=True)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    drift_distance: Mapped[float | None] = mapped_column(Float, nullable=True)  # px offset from stored position
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # PENDING | APPROVED | REJECTED | APPLIED | IGNORED
+    status: Mapped[str] = mapped_column(String(32), default="PENDING", index=True)
+    review_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    reviewed_by: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, index=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    camera: Mapped["Camera"] = relationship("Camera", back_populates="suggestions")
+    existing_table: Mapped["Table | None"] = relationship("Table", foreign_keys=[existing_table_id])  # noqa: F821
+    reviewer: Mapped["User | None"] = relationship("User", foreign_keys=[reviewed_by])  # noqa: F821
+
+
+class FloorPlanVersion(Base):
+    """
+    Lightweight versioning snapshot of floor plan table layouts after approved AI changes.
+    """
+    __tablename__ = "floor_plan_versions"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    floor_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("floors.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    # JSON array of all table positions and states at this version
+    snapshot_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    layout_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
+    change_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, index=True)
+

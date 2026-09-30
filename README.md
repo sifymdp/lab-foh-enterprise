@@ -1,283 +1,286 @@
-# FOH Table Management
+# FOH Table Management Enterprise 🍽️⚡
 
-Restaurant front-of-house floor management with camera-driven table status.
+> **Next-Generation Restaurant Front-of-House Operating System** with Real-Time YOLO11 Computer Vision, Conversational AI Assistant (Groq / Gemini / OpenAI), Live Table Map, POS Billing & Shifts, Loss Prevention, and Guest QR Ordering.
 
-A ceiling camera watches the dining room. A custom-trained YOLOv8 model reads each table as
-**clean**, **dirty**, or **occupied**, and the backend turns those readings into real table
-statuses — seating a table when guests arrive, flagging it for cleaning when they leave a mess,
-and freeing it once it's clear. Every staff screen updates live over WebSockets.
-
----
-
-## Contents
-
-- [Features](#features)
-- [Stack](#stack)
-- [Quick start](#quick-start)
-- [Demo logins](#demo-logins)
-- [How the camera pipeline works](#how-the-camera-pipeline-works)
-- [Configuration](#configuration)
-- [Project structure](#project-structure)
-- [API overview](#api-overview)
-- [Troubleshooting](#troubleshooting)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688.svg?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![React](https://img.shields.io/badge/React-19-61DAFB.svg?logo=react&logoColor=black)](https://react.dev)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.7+-3178C6.svg?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+[![YOLO11](https://img.shields.io/badge/Ultralytics-YOLO11-00FFFF.svg)](https://docs.ultralytics.com)
+[![Groq](https://img.shields.io/badge/Groq-Llama_3.3_70B-F05A28.svg)](https://groq.com)
+[![Python](https://img.shields.io/badge/Python-3.11_--_3.13-3776AB.svg?logo=python&logoColor=white)](https://python.org)
 
 ---
 
-## Features
+## 📑 Table of Contents
 
-- **Live floor plan** — drag-and-drop layout editor, colour-coded table statuses, real-time sync
-- **Camera-driven status** — custom YOLOv8 model classifies each table's region of interest
-- **ROI setup** — draw a region per table over a camera snapshot, with auto-detect assistance
-- **Table lifecycle** — seven states with server-enforced legal transitions
-- **Guest QR ordering** — scan-to-order menu, no app install, rotatable tokens
-- **AI alerts** — dirty-table escalation and walkout ("left during billing") detection
-- **Floor assistant** — chat about live floor state; works offline via a deterministic fallback
-- **Role-based access** — Owner / Manager / Host / Waiter, enforced server-side
-- **Reservations, sessions, billing, menu management, shift reports**
-
----
-
-## Stack
-
-| Layer | Technology |
-|---|---|
-| Backend | FastAPI, Python 3.13 |
-| Database | SQLite via SQLAlchemy 2.0 (PostgreSQL-ready) |
-| Computer vision | Ultralytics YOLOv8 + OpenCV |
-| Frontend | React 19 + TypeScript + Vite |
-| Real-time | Native WebSockets |
-| Auth | JWT (HS256) + bcrypt |
-| LLM (optional) | Ollama, local |
+- [Overview](#overview)
+- [Enterprise Architecture](#enterprise-architecture)
+- [System Requirements](#system-requirements)
+- [Quick Start Guide (Ready in 2 Minutes)](#quick-start-guide-ready-in-2-minutes)
+- [Demo Staff Credentials](#demo-staff-credentials)
+- [Core Modules & Capabilities](#core-modules--capabilities)
+  - [1. FOH Floor Map & Real-Time Sync](#1-foh-floor-map--real-time-sync)
+  - [2. AI Conversational Assistant & Key Setup](#2-ai-conversational-assistant--key-setup)
+  - [3. Computer Vision & CCTV Table State Pipeline](#3-computer-vision--cctv-table-state-pipeline)
+  - [4. POS Billing, Shifts & Payment Processing](#4-pos-billing-shifts--payment-processing)
+  - [5. Loss Prevention & Walkout Detection](#5-loss-prevention--walkout-detection)
+  - [6. Kitchen Display System (KDS) & Waiter Flow](#6-kitchen-display-system-kds--waiter-flow)
+  - [7. Guest QR Menu & Self-Ordering](#7-guest-qr-menu--self-ordering)
+  - [8. Menu Management, Excel Import & Versioning](#8-menu-management-excel-import--versioning)
+- [Environment Variables (.env)](#environment-variables-env)
+- [API Endpoints Cheat Sheet](#api-endpoints-cheat-sheet)
+- [Developer Testing & Quality Assurance](#developer-testing--quality-assurance)
+- [Troubleshooting & Gotchas](#troubleshooting--gotchas)
 
 ---
 
-## Quick start
+## 🌟 Overview
 
-### Option A — Docker (recommended)
+FOH Table Management Enterprise bridges digital restaurant operations with physical dining spaces. Ceiling-mounted CCTV cameras continuously monitor table zones using custom computer vision models to track whether tables are **Clean**, **Occupied**, or **Dirty**. Staff interact with a real-time floor plan synchronized instantly over WebSockets, while an integrated AI Assistant allows hands-free natural language management (e.g., *"sent bill to t1"*, *"clean table 2"*, *"seat 4 at table 3"*).
 
-```bash
-git clone https://github.com/Laahir/FOH-table-management.git
-cd FOH-table-management
-docker compose up --build
+---
+
+## 🏗️ Enterprise Architecture
+
+```mermaid
+graph TD
+    Client[Web Browser / POS Terminal] -->|HTTP / REST| API[FastAPI Backend - Port 8000]
+    Client -->|Native WebSocket| WS[WebSocket Room Hub /ws/floor-1]
+    Guest[Customer Mobile] -->|Scan QR| GuestUI[Guest Menu /guest/menu]
+    
+    subgraph Backend Services
+        API --> DB[(SQLite / PostgreSQL via SQLAlchemy 2.0)]
+        API --> CV[YOLO11 Vision Engine + ROI Tracker]
+        API --> AI[Groq Llama 3.3 70B / Gemini / Local NLU]
+        API --> POS[Billing, Cashier Shifts, Taxes & Audits]
+        API --> LP[Loss Prevention & Video Evidence]
+    end
+    
+    subgraph Video Ingestion
+        RTSP[CCTV Stream / YouTube Live / Video Loop] --> CV
+    end
 ```
 
-Open **http://localhost:5173**.
+---
 
-First build takes several minutes (PyTorch). Later starts take seconds.
+## 💻 System Requirements
+
+- **Python**: `3.11` to `3.13` (*Note: Python 3.14 is currently not supported by PyO3/pydantic-core*)
+- **Node.js**: `20.19+` or `22+`
+- **Operating System**: Windows 10/11, macOS, or Linux
+- **Optional**: Free Groq API Key ([console.groq.com](https://console.groq.com/keys)) or Google Gemini API Key for high-speed cloud LLM inference.
+
+---
+
+## 🚀 Quick Start Guide (Ready in 2 Minutes)
+
+### 1. Set Up Backend
+
+Open your terminal (PowerShell on Windows, or Bash on macOS/Linux):
 
 ```bash
-docker compose up -d        # background
-docker compose logs -f      # watch camera decisions
-docker compose down         # stop
-```
-
-### Option B — Run locally
-
-**Requires Python 3.11–3.13** (see [Troubleshooting](#troubleshooting) — 3.14 will not build)
-and **Node 20.19+**.
-
-Backend:
-
-```bash
+# 1. Navigate to backend directory
 cd backend
-python3.13 -m venv venv
-source venv/bin/activate          # Windows: venv\Scripts\activate
+
+# 2. Create virtual environment
+python -m venv .venv
+
+# 3. Activate virtual environment
+# Windows (PowerShell):
+.venv\Scripts\Activate.ps1
+# macOS/Linux:
+source .venv/bin/activate
+
+# 4. Install dependencies
 pip install -r requirements.txt
 
-# Point at the repo-root database, which holds the saved floorplan + ROIs
-echo 'DATABASE_URL=sqlite:///../foh.db' > .env
-echo 'CAMERA_SCAN_INTERVAL_SECONDS=10' >> .env
-
-uvicorn app.main:app --reload
+# 5. Start the backend with live reload
+python -m uvicorn app.main:socket_app --host 127.0.0.1 --port 8000 --reload
 ```
 
-Frontend, in a second terminal:
+*The backend will automatically create and seed `foh.db` with sample floor plans, 10 tables, demo staff, active cashier shift, and menu items.*
+
+### 2. Set Up Frontend
+
+In a **second** terminal window:
 
 ```bash
+# 1. Navigate to frontend directory
 cd frontend
+
+# 2. Install dependencies
 npm install
+
+# 3. Start Vite dev server
 npm run dev
 ```
 
-| Service | URL |
-|---|---|
-| App | http://localhost:5173 |
-| API | http://localhost:8000 |
-| Interactive API docs | http://localhost:8000/docs |
+### 3. Open in Browser
+
+- **Application URL**: [http://localhost:5173](http://localhost:5173)
+- **Interactive Swagger API Docs**: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+- **Redoc Documentation**: [http://127.0.0.1:8000/redoc](http://127.0.0.1:8000/redoc)
 
 ---
 
-## Demo logins
+## 👥 Demo Staff Credentials
 
-Password for all accounts: **`demo1234`**
+The system seeds 6 distinct demo personas representing every front-of-house and back-of-house role:
 
-| Role | Email |
-|---|---|
-| Owner | `owner@foh.demo` |
-| Manager | `manager@foh.demo` |
-| Host | `host@foh.demo` |
-| Waiter | `waiter@foh.demo` |
+| Role | Email | Password | Permissions & Primary Scope |
+|:---|:---|:---|:---|
+| **Owner** | `owner@gmail.com` | `Owner@1234` | Full system access, users, revenue analytics, audits |
+| **Manager** | `manager@gmail.com` | `Manager@1234` | Shift management, refund approvals, floor layouts, AI config |
+| **Host** | `host@gmail.com` | `Host@1234` | Seating guests, reservations, waitlists, table assignments |
+| **Cashier** | `cashier@gmail.com` | `Cashier@1234` | Billing, payment processing (Cash/Card/UPI), shift start/end |
+| **Waiter** | `waiter@gmail.com` | `Waiter@1234` | Taking orders, serving tables, requesting bills, cleaning alerts |
+| **Chef** | `chef@gmail.com` | `Chef@1234` | Kitchen Display System (KDS), bumping order tickets, 86 items |
 
----
-
-## How the camera pipeline works
-
-The trained model ships in the repo at `backend/models/table_cleanliness_best.pt`
-(classes: `clean`, `dirty`, `occupied`).
-
-1. A background worker wakes every `CAMERA_SCAN_INTERVAL_SECONDS`.
-2. For each table under camera authority it samples 5 frames from that table's source.
-3. YOLO runs once per frame on the **full** frame; each detection is matched to a table by how
-   much of that table's ROI rectangle it covers (default threshold: 30%).
-4. The frame readings collapse into one smoothed label per table per tick.
-5. A status changes only after **3 consecutive ticks agree**.
-
-### Transitions the camera is allowed to make
-
-| From | Camera sees | To |
-|---|---|---|
-| `AVAILABLE` | `occupied` ×3 | `SEATED` |
-| `SEATED` | `dirty` ×3 (guests gone) | `CLEANING` |
-| `SEATED` | `clean` ×3 (guests gone) | `AVAILABLE` |
-| `CLEANING` | `clean` ×3 (after grace period) | `AVAILABLE` |
-| `BILLING` | empty ×3 | *(alert only — status never changes)* |
-
-### Deliberate limits
-
-- **Payment states are untouchable.** A table in `BILLING` never changes status from the camera.
-- **An unclear view is never "clean."** No ROI match means *no reading*; the previous state holds.
-- **Cleaning has a grace period** (`CAMERA_CLEANING_GRACE_SECONDS`) before the camera judges.
-- **Alerts are edge-triggered** — they fire once and re-arm only on a status change.
-
-### Recorded footage
-
-For demos, `camera_url` may point at a video file. Captures are held open between ticks and
-positioned by elapsed wall-clock time, so a recording plays forward at real-time speed and loops
-at the end — behaving like a live camera. Sample videos live in `backend/camera_uploads/`.
+*(Legacy logins `owner@foh.demo` with password `demo1234` are also retained for backwards compatibility).*
 
 ---
 
-## Configuration
+## 🧩 Core Modules & Capabilities
 
-Backend settings are read from environment variables or `backend/.env`
-(see `backend/.env.example`).
+### 1. FOH Floor Map & Real-Time Sync
+- **Interactive Canvas**: Drag-and-drop table layout editor with sections (Indoor, Outdoor/Patio, Bar).
+- **Table Lifecycle State Machine**: Strictly enforces legal transitions:
+  `AVAILABLE` ➔ `SEATED` ➔ `ORDERED` ➔ `SERVED` ➔ `BILLING` ➔ `PAID` ➔ `CLEANING` ➔ `AVAILABLE`.
+- **WebSocket Synchronization**: Emits updates to `/ws/floor-1` rooms. Any status change made by a waiter, cashier, or camera instantly updates all active staff screens without refreshing.
 
-| Variable | Default | Notes |
-|---|---|---|
-| `DATABASE_URL` | `sqlite:///./foh.db` | **Relative to the working directory** — see Troubleshooting |
-| `JWT_SECRET` | `dev-secret-change-in-production` | Change for any real deployment |
-| `JWT_EXPIRE_HOURS` | `8` | Token lifetime |
-| `CORS_ORIGINS` | `http://localhost:5173` | Comma-separated |
-| `CAMERA_ENABLED` | `true` | Set `false` to disable the pipeline entirely |
-| `YOLO_TABLE_STATE_MODEL_PATH` | `backend/models/table_cleanliness_best.pt` | Searched relative to the backend dir too |
-| `CAMERA_SCAN_INTERVAL_SECONDS` | `30` | Use `10` for demos |
-| `CONSECUTIVE_SCANS_REQUIRED` | `3` | Ticks that must agree before a status changes |
-| `TABLE_STATE_CONFIDENCE_THRESHOLD` | `0.25` | Minimum detection confidence |
-| `CAMERA_CLEANING_GRACE_SECONDS` | `60` | Quiet period after entering `CLEANING` |
-| `STREAM_ROI_MATCH_MIN_OVERLAP` | `0.3` | ROI coverage needed to match a detection |
-| `OLLAMA_BASE_URL` | `http://localhost:11434` | Optional; assistant falls back without it |
+### 2. AI Conversational Assistant & Key Setup
+- **FOH Assistant Floating Widget**: Accessible via the `✦` button in the bottom right corner.
+- **Natural Language Parsing**:
+  - *"Sent bill to t1"* ➔ Sets Table T1 to `BILLING` and alerts cashier.
+  - *"Clean table 3"* ➔ Marks Table T3 as `CLEANING` for busser.
+  - *"Seat a party of 4 at table 2"* ➔ Seats guests and opens dining session.
+  - *"Which tables are free right now?"* ➔ Instant occupancy summary.
+  - *"What are today's shift stats?"* ➔ Sales and order recap.
+- **In-Widget API Key Setup**: Click the **⚙** gear icon on the assistant pill to open an inline drawer. Paste a free Groq or Gemini key, click **Activate**, and the system will hot-reload cloud intelligence dynamically without restarting the server!
 
-Frontend (`frontend/.env`):
+### 3. Computer Vision & CCTV Table State Pipeline
+- **Dual Model Engine**:
+  - `yolo11n.pt`: Detects persons, dishware, and general table activity.
+  - `table_cleanliness_best.pt`: Specialized model trained on restaurant table states (`clean`, `dirty`, `occupied`).
+- **Region of Interest (ROI) Calibration**: Draw precise bounding boxes over camera frames for each table with auto-detection assistance.
+- **Live Stream Relay**: MJPEG stream served at `/stream/{floor_id}` with live bounding boxes and confidence overlays.
+- **Video Source Flexibility**: Supports live Webcams, RTSP camera streams, YouTube Live URLs, or looping MP4 clips from `backend/camera_uploads/`.
 
-| Variable | Value |
-|---|---|
-| `VITE_API_URL` | `http://localhost:8000` |
-| `VITE_SOCKET_URL` | `http://localhost:8000` |
-| `VITE_USE_MOCK` | `false` |
+### 4. POS Billing, Shifts & Payment Processing
+- **Cashier Shifts**: Start shift with opening float, record drawer reconciliation at close with automatic discrepancy calculation.
+- **Itemized GST & Service Charges**: Accurate computation compliant with hospitality tax standards.
+- **Flexible Payment Methods**: Cash, Credit/Debit Card, UPI / QR, Online Payment Gateway.
+- **Manager Approval Workflow**: Cashiers can request discounts or refunds; approvals over threshold require Manager/Owner PIN.
 
----
+### 5. Loss Prevention & Walkout Detection
+- **Edge-Triggered Detection**: Automatically detects when guests leave a table that is in `BILLING` status before payment confirmation.
+- **Incident Modal**: Displays captured video frame evidence and provides resolution tags (`PAID_COUNTER`, `FALSE_ALARM`, `LOGGED_UNRECOVERED`).
 
-## Project structure
+### 6. Kitchen Display System (KDS) & Waiter Flow
+- Real-time station routing (Grill, Fry, Salad, Bar).
+- Ticket timer alerts for delayed items.
+- One-click cook/bump status updates.
 
-```
-backend/
-  app/
-    routers/      HTTP endpoints (12 routers, ~46 routes)
-    services/     business logic — camera_pipeline, table, session, ai, ...
-    models/       SQLAlchemy ORM models (17)
-    schemas/      Pydantic request/response shapes
-    core/         security, permissions, status machine, YOLO, ROI matching
-    workers/      background camera scan loop
-  models/         trained YOLO weights (best.pt)
-  camera_uploads/ demo video sources
-frontend/
-  src/
-    pages/        Floor, Camera Setup, Sessions, Reservations, Menu, Reports...
-    components/   floor plan canvas, ROI modal, chat dock, layout
-    context/      auth, floor state, socket
-    api/          typed API client
-compose.yaml      full stack
-foh.db            demo database (floorplan + ROIs)
-```
+### 7. Guest QR Menu & Self-Ordering
+- Scan table QR code to open `/guest/menu?token=<token>`.
+- Responsive mobile menu with item details, dietary tags (Veg/Non-Veg), and real-time total.
+- **Digital Waiter Bell**: Guests can tap *"🔔 Call Waiter"* or *"🧾 Request Bill"* directly from their phone.
+
+### 8. Menu Management, Excel Import & Versioning
+- Upload menu `.xlsx` or `.csv` spreadsheets.
+- **Staging Review Table**: Highlights new items, price changes, duplicate codes, and deactivated items before applying.
+- **Version History & Rollback**: Maintain complete revision logs with one-click restore.
 
 ---
 
-## API overview
+## ⚙️ Environment Variables (.env)
 
-Interactive docs at `/docs` when running. Highlights:
+Configuration is loaded from `backend/.env` (or root `.env`):
 
-| Method | Path | Purpose |
-|---|---|---|
-| `POST` | `/auth/login` | Obtain JWT |
-| `GET` | `/floors/current` | Floor plan with tables |
-| `PATCH` | `/tables/{id}/status` | Change status (validated against the state machine) |
-| `POST` | `/tables/{id}/camera/upload` | Upload a camera source for a table |
-| `POST` | `/tables/{id}/camera/auto-roi` | Suggest an ROI rectangle |
-| `POST` | `/tables/{id}/camera/analyze-snapshot` | Run the model on one snapshot |
-| `GET` | `/stream/{floor_id}` | Annotated MJPEG live stream |
-| `POST` | `/sessions/seat` | Seat a party |
-| `POST` | `/ai/chat` | Ask the floor assistant |
-| `GET` | `/ai/events` | Open alerts |
-| `GET` | `/guest/menu?token=` | Guest QR menu (no auth) |
-| `WS` | `/ws/{floor_id}?token=` | `table_updated`, `ai_alert`, `order_placed`, `payment_confirmed` |
+| Variable | Default Value | Description |
+|:---|:---|:---|
+| `DATABASE_URL` | `sqlite:///./foh.db` | SQLite file location or PostgreSQL connection string |
+| `JWT_SECRET` | `dev-secret-change-in-production` | Secret key used for signing JWT tokens |
+| `JWT_EXPIRE_HOURS` | `8` | Token expiration duration |
+| `CORS_ORIGINS` | `http://localhost:5173,...` | Allowed CORS origins for frontend connections |
+| `GROQ_API_KEY` | *(empty)* | Free API key from [console.groq.com](https://console.groq.com) |
+| `GROQ_MODEL` | `llama-3.3-70b-versatile` | Primary conversational AI model |
+| `GEMINI_API_KEY` | *(empty)* | Google Gemini API key (optional alternative) |
+| `CAMERA_ENABLED` | `true` | Toggles background computer vision processing loop |
+| `CAMERA_SCAN_INTERVAL_SECONDS` | `10` | Frequency in seconds between camera analysis ticks |
+| `CV_MODEL_NAME` | `yolo11n.pt` | Base YOLO model file |
 
 ---
 
-## Troubleshooting
+## 📡 API Endpoints Cheat Sheet
 
-**`pip install` fails building `pydantic-core` / "PyO3's maximum supported version is 3.13"**
-Your Python is 3.14. Rebuild the venv with 3.11–3.13:
+Interactive documentation with live requests is available at [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
+
+### Authentication & Staff
+- `POST /auth/login` — Login with email/password, returns JWT token.
+- `GET /auth/me` — Return current authenticated user profile and permissions.
+- `GET /users` — List staff members (Manager/Owner only).
+
+### Floor & Table Management
+- `GET /floors/current` — Get current floor layout, tables, coordinates, and statuses.
+- `PATCH /tables/{id}/status` — Update table status (validated by state machine).
+- `POST /sessions/seat` — Seat guests and assign a dining session.
+- `POST /sessions/{id}/close` — Close dining session upon departure.
+
+### AI Assistant & Alerts
+- `GET /ai/provider` — Returns active AI provider (`Groq`, `Gemini`, `Local Engine`).
+- `POST /ai/configure-key` — Persist and hot-reload AI API key without restarting server.
+- `POST /ai/chat` — Assistant chat endpoint with multi-turn message history.
+- `GET /ai/events` — Fetch open AI alerts (cleaning escalation, mismatch).
+- `PATCH /ai/events/{id}/resolve` — Mark alert as resolved.
+
+### Billing & Cashier Shifts
+- `POST /cashier-shifts/start` — Start cashier shift with opening cash amount.
+- `PATCH /cashier-shifts/{id}/end` — Close cashier shift and reconcile drawer.
+- `POST /billing/bills` — Generate itemized bill for a table.
+- `POST /billing/bills/{id}/pay` — Record payment (CASH, CARD, UPI, QR).
+- `POST /refunds` — Create refund request (requires Manager approval).
+
+---
+
+## 🧪 Developer Testing & Quality Assurance
+
+Run the built-in automated test suites to verify that the backend and frontend are healthy:
+
 ```bash
-rm -rf venv && python3.13 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
+# 1. Run full backend enterprise flow tests
+cd backend
+python test_full_suite.py
+
+# 2. Run AI and table NLU verification
+python -c "from app.services.chat_service import _extract_table_number; assert _extract_table_number('sent bill to t1') == '1'; print('NLU Passed!')"
+
+# 3. Check frontend TypeScript compilation
+cd ../frontend
+npx tsc --noEmit
 ```
 
-**Floor plan shows 10 tables with patio and bar sections**
-That's the seeded demo layout — the backend couldn't find `foh.db` and created an empty one.
-`DATABASE_URL` is *relative to where you launch uvicorn*, so running from `backend/` looks for
-`backend/foh.db`. Point it at the repo-root database:
-```bash
-echo 'DATABASE_URL=sqlite:///../foh.db' > backend/.env
-```
-The real floorplan has **5 tables in one section**.
+---
 
-**`Failed to load table-state YOLO model` / `FileNotFoundError`**
-`backend/models/table_cleanliness_best.pt` is missing. Note the repo's `.gitignore` excludes
-`*.pt` with an explicit exception for this file — if you copied files manually, copy the
-`.gitignore` too, or the weights get skipped.
+## 🛠️ Troubleshooting & Gotchas
 
-**Login fails with "Invalid email or password" but the credentials are right**
-The login page reports *any* failure that way, including "backend unreachable." Check
-`http://localhost:8000/health` returns `{"ok":true}`. Both servers must run at once.
+#### 1. `IntegrityError: UNIQUE constraint failed: audit_logs.id`
+- **Cause**: Re-running database seeders on an existing SQLite database.
+- **Fix**: The seeder in `app/seed.py` has been updated with idempotent `db.get(...)` checks on all historical records. If you ever want a totally fresh database, delete `backend/foh.db` and start uvicorn again.
 
-**Docker build downloads gigabytes of NVIDIA CUDA packages, or times out**
-Torch's default wheels pull CUDA runtimes that Docker Desktop can't use. The backend Dockerfile
-installs the CPU build first — make sure you're using the committed Dockerfile.
+#### 2. AI Assistant says *"Running in local intelligence mode"*
+- **Fix**: Open the FOH Assistant widget in the UI, click **⚙**, select **Groq**, paste your free `gsk_...` key from [console.groq.com](https://console.groq.com), and click **Activate**. It will connect instantly without needing to restart the backend.
 
-**`Bind for 0.0.0.0:8000 failed: port is already allocated`**
-A local uvicorn is already running. Stop it, or stop the containers:
-```bash
-lsof -ti :8000 -sTCP:LISTEN | xargs kill
-```
+#### 3. WebSocket Connection 403 Forbidden
+- **Cause**: Trying to connect to `/ws/{floor_id}` without a valid JWT token query parameter.
+- **Fix**: Ensure your frontend has an active login session; the frontend `SocketContext` automatically appends `?token=<access_token>` to all socket handshakes.
 
-**Table statuses never change**
-Restart the backend after code changes, and confirm the pipeline is alive:
-```bash
-docker compose logs backend | grep "Camera changed"
-```
-Remember an `AVAILABLE` table reading `dirty` correctly does nothing — only three consecutive
-`occupied` reads promote it. See [the transition table](#transitions-the-camera-is-allowed-to-make).
+#### 4. Windows PowerShell Script Execution Policy
+- If `npm` or `.venv\Scripts\Activate.ps1` is blocked by Windows execution policy, run:
+  ```powershell
+  Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+  ```
 
-**`opencv` ImportError: `libGL.so.1: cannot open shared object file`**
-Ultralytics pulls non-headless opencv. In a slim image install `libgl1` and `libglib2.0-0`
-(the backend Dockerfile already does).
+---
+
+**Built with pride for high-throughput restaurant operations.**

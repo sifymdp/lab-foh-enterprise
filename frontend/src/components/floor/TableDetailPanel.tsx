@@ -11,6 +11,7 @@ import type { Floor, Table, TableType, BillDetail } from '../../types'
 import { OccupancyTimer } from './OccupancyTimer'
 import { PrintQRButton } from './PrintQRButton'
 import { StatusActions } from './StatusActions'
+import { SeatGuestModal } from './SeatGuestModal'
 
 interface TableDetailPanelProps {
   floor: Floor
@@ -75,6 +76,7 @@ export function TableDetailPanel({
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [confirmPaid, setConfirmPaid] = useState(false)
   const [billingLoading, setBillingLoading] = useState(false)
+  const [showSeatModal, setShowSeatModal] = useState(false)
 
   const session = ['AVAILABLE', 'CLEANING', 'MAINTENANCE'].includes(table.status)
     ? null
@@ -164,6 +166,14 @@ export function TableDetailPanel({
   }
 
   async function handleStatus(next: typeof table.status) {
+    if (['ACTIVE', 'SEATED', 'OCCUPIED'].includes(next) && !['ACTIVE', 'SEATED', 'OCCUPIED'].includes(table.status)) {
+      if (onSeatGuests) {
+        onSeatGuests()
+      } else {
+        setShowSeatModal(true)
+      }
+      return
+    }
     setStatusLoading(true)
     setStatusError(null)
     try {
@@ -644,10 +654,26 @@ export function TableDetailPanel({
           </>
         )}
         {session && (
-          <>
-            {session.guestName && <div><dt>Guest</dt><dd>{session.guestName}</dd></div>}
-            <div><dt>Party size</dt><dd>{session.partySize} guests</dd></div>
-          </>
+          <div style={{ background: 'var(--surface-2, #f8fafc)', padding: '10px 12px', borderRadius: '8px', margin: '6px 0 10px', border: '1px solid var(--border)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <span style={{ fontSize: '0.78rem', textTransform: 'uppercase', fontWeight: 700, color: 'var(--text-muted)' }}>Dining Party</span>
+              {canSeat && (
+                <button
+                  type="button"
+                  onClick={() => setShowSeatModal(true)}
+                  style={{ background: 'none', border: 'none', color: '#2563eb', fontSize: '0.78rem', fontWeight: 600, cursor: 'pointer', padding: 0 }}
+                >
+                  ✎ Edit Guest Info
+                </button>
+              )}
+            </div>
+            <div style={{ fontSize: '0.92rem', fontWeight: 700, color: '#1e293b' }}>
+              👤 {session.guestName || 'Unnamed Guest'}
+            </div>
+            <div style={{ fontSize: '0.82rem', color: '#64748b', marginTop: 2 }}>
+              👥 {session.partySize} {session.partySize === 1 ? 'person' : 'people'}
+            </div>
+          </div>
         )}
       </dl>
 
@@ -878,6 +904,14 @@ export function TableDetailPanel({
         onConfirm={handleMarkPaid}
         onCancel={() => setConfirmPaid(false)}
       />
+      {showSeatModal && (
+        <SeatGuestModal
+          table={table}
+          initialGuestName={session?.guestName}
+          initialPartySize={session?.partySize}
+          onClose={() => setShowSeatModal(false)}
+        />
+      )}
     </aside>
   )
 }

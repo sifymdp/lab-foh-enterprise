@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_current_user, require_manager_or_owner, require_menu_manager
@@ -73,9 +74,14 @@ def assistant_chat(
     user: User = Depends(get_current_user),
 ) -> ChatResponse:
     from app.services import chat_service
-    reply, actions = chat_service.chat(
-        db, user, [m.model_dump(by_alias=False) for m in body.messages]
-    )
+    messages_payload: list[dict] = []
+    if body.messages:
+        messages_payload = [m.model_dump(by_alias=False) for m in body.messages]
+    elif body.message:
+        messages_payload = [m.model_dump(by_alias=False) for m in body.history] + [
+            {"role": "user", "content": body.message}
+        ]
+    reply, actions = chat_service.chat(db, user, messages_payload)
     return ChatResponse(reply=reply, actions=actions)
 
 
@@ -87,3 +93,28 @@ def shift_report(
 ) -> ShiftReport:
     content, stats = ai_service.shift_report(db, date)
     return ShiftReport(report_date=stats.get("reportDate", date or ""), content=content, stats=stats)
+
+
+@router.get("/provider")
+def get_ai_provider(
+    _user: User = Depends(get_current_user),
+) -> dict:
+    """Returns whether cloud LLM is active and provider info."""
+    from app.services.groq_llm import get_provider_status
+    return get_provider_status()
+
+
+class ConfigureKeyIn(BaseModel):
+    provider: str = "groq"
+    api_key: str
+    model: str | None = None
+
+
+@router.post("/configure-key")
+def configure_ai_key(
+    body: ConfigureKeyIn,
+    _user: User = Depends(get_current_user),
+) -> dict:
+    """Update and persist AI API key directly without restarting the server."""
+    from app.services.groq_llm import save_api_key
+    return save_api_key(body.provider, body.api_key, body.model)

@@ -2,6 +2,7 @@ import html
 import json
 from collections import defaultdict
 from datetime import datetime, timezone
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse
@@ -36,15 +37,74 @@ CATEGORY_ORDER = [
 ]
 
 
-def _resolve_qr(db: Session, token: str) -> TableQRCode:
+def _get_or_create_qr_for_table(db: Session, table: Table) -> TableQRCode:
     qr = (
         db.query(TableQRCode)
-        .filter(TableQRCode.token == token, TableQRCode.is_active.is_(True))
+        .filter(TableQRCode.table_id == table.id, TableQRCode.is_active.is_(True))
         .first()
     )
-    if not qr:
-        raise HTTPException(404, "Invalid or expired table token")
+    if qr:
+        return qr
+
+    from app.core.ids import new_id
+    token = f"t{table.number}".lower().replace(" ", "").replace("-", "")
+    existing = db.query(TableQRCode).filter(TableQRCode.token == token).first()
+    if existing:
+        existing.table_id = table.id
+        existing.is_active = True
+        qr = existing
+    else:
+        qr = TableQRCode(
+            id=new_id(),
+            table_id=table.id,
+            token=token,
+            is_active=True,
+        )
+        db.add(qr)
+    db.commit()
+    db.refresh(qr)
     return qr
+
+
+def _resolve_qr(db: Session, identifier: Any = None) -> TableQRCode:
+    clean_ident = str(identifier).strip() if (identifier and isinstance(identifier, str)) else ""
+    if not clean_ident:
+        table = db.query(Table).order_by(Table.number.asc()).first()
+        if not table:
+            raise HTTPException(404, "No active dining tables found")
+        return _get_or_create_qr_for_table(db, table)
+
+    ident = clean_ident
+
+    # 1. Direct active token match
+    qr = (
+        db.query(TableQRCode)
+        .filter(TableQRCode.token == ident, TableQRCode.is_active.is_(True))
+        .first()
+    )
+    if qr:
+        return qr
+
+    # 2. Check if identifier is table_id
+    table = db.query(Table).filter(Table.id == ident).first()
+    if not table:
+        # Check if identifier is table number (e.g. '1', 'T1', 'Table 1')
+        table = db.query(Table).filter(Table.number == ident).first()
+    if not table:
+        clean = ident.replace("tbl-", "").replace("table-", "").lstrip("Tt ")
+        table = db.query(Table).filter(
+            (Table.number == clean)
+            | (Table.number == f"T{clean}")
+            | (Table.number == f"Table {clean}")
+        ).first()
+    if not table:
+        # Fallback to first table on active floor so guests never hit dead ends
+        table = db.query(Table).order_by(Table.number.asc()).first()
+
+    if not table:
+        raise HTTPException(404, "Table not found")
+
+    return _get_or_create_qr_for_table(db, table)
 
 
 def _slugify(text: str) -> str:
@@ -121,6 +181,7 @@ def _build_guest_menu_html(
             "tableId": table.id,
             "sessionId": session_id,
             "tableNumber": table.number,
+            "guestName": guest_name or "",
             "apiBase": settings.guest_menu_base_url.rstrip("/"),
         }
     )
@@ -178,9 +239,10 @@ def _build_guest_menu_html(
             f'<h2>{html.escape(category)}</h2>{"".join(items_html)}</section>'
         )
 
+    is_custom_name = bool(guest_name and not guest_name.startswith("Guest Table"))
     welcome_line = (
-        f"Welcome {html.escape(guest_name)} · Table {html.escape(table.number)}"
-        if guest_name
+        f"Welcome <strong>{html.escape(guest_name)}</strong> · Table {html.escape(table.number)}"
+        if is_custom_name
         else f"Table {html.escape(table.number)}"
     )
 
@@ -211,6 +273,41 @@ def _build_guest_menu_html(
     }}
     header h1 {{ margin: 0; font-size: 1.3rem; font-weight: 600; letter-spacing: -0.01em; }}
     header p {{ margin: 3px 0 0; opacity: 0.82; font-size: 0.82rem; }}
+    .header-user-badge {{
+      display: inline-flex; align-items: center; gap: 6px;
+      cursor: pointer; padding: 2px 8px; border-radius: 6px;
+      background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);
+      transition: background 0.15s ease;
+    }}
+    .header-user-badge:hover {{ background: rgba(255,255,255,0.2); }}
+    .welcome-card {{
+      background: #ffffff;
+      border-radius: 20px;
+      padding: 26px 22px;
+      max-width: 390px;
+      width: 90%;
+      text-align: center;
+      box-shadow: 0 20px 45px rgba(0,0,0,0.24);
+      border: 1px solid var(--line);
+    }}
+    .btn-party-pill {{
+      flex: 1;
+      padding: 8px 0;
+      border-radius: 8px;
+      border: 1.5px solid var(--line);
+      background: var(--cream);
+      color: var(--ink);
+      font-weight: 700;
+      font-size: 0.9rem;
+      cursor: pointer;
+      font-family: inherit;
+      transition: all 0.15s ease;
+    }}
+    .btn-party-pill.is-selected {{
+      background: var(--green);
+      color: #ffffff;
+      border-color: var(--green);
+    }}
     .track-btn {{
       flex-shrink: 0; position: relative; background: rgba(255,255,255,0.12); color: #fff;
       border: 1px solid rgba(255,255,255,0.25); border-radius: 10px; padding: 8px 12px;
@@ -445,8 +542,8 @@ def _build_guest_menu_html(
 <body>
   <header>
     <div>
-      <h1>{html.escape(restaurant_name)}</h1>
-      <p>{welcome_line}</p>
+      <h1 style="cursor:pointer;" onclick="openWelcomeNameModal()">{html.escape(restaurant_name)}</h1>
+      <p id="header-welcome-text" class="header-user-badge" onclick="openWelcomeNameModal()">{welcome_line} <span style="font-size:0.72rem; opacity:0.85; text-decoration:underline;">✎ Name</span></p>
     </div>
     <button type="button" class="track-btn" onclick="callWaiter()">🔔 Call waiter</button>
     <button type="button" class="track-btn" id="bill-btn" style="display:none;" onclick="toggleOverlay('bill-overlay', true)">
@@ -543,6 +640,39 @@ def _build_guest_menu_html(
     </div>
   </div>
 
+  <div class="overlay overlay--center" id="welcome-name-overlay" style="display:none;" onclick="if(event.target===this) closeWelcomeNameModal()">
+    <div class="welcome-card" onclick="event.stopPropagation()">
+      <div style="font-size:2.4rem; margin-bottom:8px;">🍽️</div>
+      <h2 style="margin:0 0 6px; font-family:'Fraunces',serif; font-size:1.35rem; color:var(--green);">Welcome to {html.escape(restaurant_name)}!</h2>
+      <p style="margin:0 0 16px; font-size:0.85rem; color:var(--muted); line-height:1.4;">
+        Table <strong>#{html.escape(table.number)}</strong> · Please enter your name so our staff and kitchen know who is ordering.
+      </p>
+      <form id="welcome-name-form" onsubmit="submitGuestName(event)">
+        <div style="text-align:left; margin-bottom:14px;">
+          <label style="display:block; font-size:0.78rem; font-weight:700; color:var(--ink); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.04em;">Your Name *</label>
+          <input type="text" id="welcome-guest-name-input" required class="input" placeholder="e.g. Alex, Priya, John"
+                 style="width:100%; padding:12px 14px; border-radius:10px; border:1.5px solid var(--line); font-size:1rem; font-family:inherit; outline:none; box-sizing:border-box;" />
+        </div>
+        <div style="text-align:left; margin-bottom:18px;">
+          <label style="display:block; font-size:0.78rem; font-weight:700; color:var(--ink); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.04em;">Number of Guests (Party Size)</label>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <input type="number" id="welcome-party-size-input" min="1" max="25" value="2"
+                   style="width:70px; padding:10px; border-radius:10px; border:1.5px solid var(--line); font-size:1rem; text-align:center; font-weight:700; box-sizing:border-box;" />
+            <div style="display:flex; gap:6px; flex:1;">
+              <button type="button" class="btn-party-pill" onclick="setWelcomeParty(1)">1</button>
+              <button type="button" class="btn-party-pill is-selected" onclick="setWelcomeParty(2)">2</button>
+              <button type="button" class="btn-party-pill" onclick="setWelcomeParty(4)">4</button>
+              <button type="button" class="btn-party-pill" onclick="setWelcomeParty(6)">6+</button>
+            </div>
+          </div>
+        </div>
+        <button type="submit" id="btn-submit-guest-name" class="btn-confirm" style="width:100%; padding:13px; font-size:0.98rem; font-weight:700; border-radius:12px; background:var(--green); color:#fff; border:none; cursor:pointer;">
+          Start Dining & View Menu →
+        </button>
+      </form>
+    </div>
+  </div>
+
   <div class="overlay" id="confirm-bill-overlay" onclick="if(event.target===this) toggleOverlay('confirm-bill-overlay', false)">
     <div class="sheet">
       <h2 style="margin:0 0 8px;font-size:1.1rem;">Ready for the bill?</h2>
@@ -565,6 +695,91 @@ def _build_guest_menu_html(
       const saved = localStorage.getItem(CART_KEY);
       if (saved) cart = JSON.parse(saved);
     }} catch (e) {{ cart = {{}}; }}
+
+    function openWelcomeNameModal() {{
+      const overlay = document.getElementById('welcome-name-overlay');
+      if (overlay) {{
+        overlay.style.display = 'flex';
+        overlay.classList.add('is-open');
+        const inp = document.getElementById('welcome-guest-name-input');
+        const saved = localStorage.getItem('foh_guest_name_' + CONFIG.tableId) || (CONFIG.guestName && !CONFIG.guestName.startsWith('Guest Table') ? CONFIG.guestName : '');
+        if (inp) {{
+          inp.value = saved;
+          setTimeout(() => inp.focus(), 150);
+        }}
+      }}
+    }}
+
+    function closeWelcomeNameModal() {{
+      const overlay = document.getElementById('welcome-name-overlay');
+      if (overlay) {{
+        overlay.classList.remove('is-open');
+        overlay.style.display = 'none';
+      }}
+    }}
+
+    function checkGuestIdentification() {{
+      const savedName = localStorage.getItem('foh_guest_name_' + CONFIG.tableId);
+      const currentName = CONFIG.guestName;
+      const isGeneric = !currentName || currentName.startsWith('Guest Table') || currentName.trim() === '';
+
+      if (savedName && savedName.trim()) {{
+        updateWelcomeHeader(savedName);
+      }} else if (isGeneric) {{
+        openWelcomeNameModal();
+      }} else {{
+        updateWelcomeHeader(currentName);
+      }}
+    }}
+
+    function setWelcomeParty(num) {{
+      const inp = document.getElementById('welcome-party-size-input');
+      if (inp) inp.value = num;
+      document.querySelectorAll('.btn-party-pill').forEach(b => {{
+        b.classList.toggle('is-selected', b.textContent === String(num) || (num >= 6 && b.textContent === '6+'));
+      }});
+    }}
+
+    async function submitGuestName(e) {{
+      e.preventDefault();
+      const nameInp = document.getElementById('welcome-guest-name-input');
+      const partyInp = document.getElementById('welcome-party-size-input');
+      const name = (nameInp ? nameInp.value : '').trim();
+      const partySize = parseInt(partyInp ? partyInp.value : '2', 10) || 2;
+      if (!name) {{
+        showToast('Please enter your name', true);
+        return;
+      }}
+
+      const btn = document.getElementById('btn-submit-guest-name');
+      if (btn) {{ btn.disabled = true; btn.textContent = 'Saving...'; }}
+
+      try {{
+        localStorage.setItem('foh_guest_name_' + CONFIG.tableId, name);
+        CONFIG.guestName = name;
+        updateWelcomeHeader(name);
+
+        await fetch(API_BASE + '/guest/identify', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ token: CONFIG.token, guestName: name, partySize: partySize }}),
+        }});
+
+        closeWelcomeNameModal();
+        showToast('Welcome, ' + name + '! Explore our menu below.');
+      }} catch (err) {{
+        closeWelcomeNameModal();
+      }} finally {{
+        if (btn) {{ btn.disabled = false; btn.textContent = 'Start Dining & View Menu →'; }}
+      }}
+    }}
+
+    function updateWelcomeHeader(name) {{
+      const el = document.getElementById('header-welcome-text');
+      if (el) {{
+        el.innerHTML = 'Welcome, <strong style="color:var(--gold);">' + name + '</strong> · Table ' + CONFIG.tableNumber + ' <span style="font-size:0.72rem; opacity:0.85; text-decoration:underline;">✎ Name</span>';
+      }}
+    }}
 
     function saveCart() {{
       try {{ localStorage.setItem(CART_KEY, JSON.stringify(cart)); }} catch (e) {{ /* ignore */ }}
@@ -1059,6 +1274,7 @@ def _build_guest_menu_html(
     pollOrderStatus();
     pollBillStatus();
     pollWaiterStatus();
+    checkGuestIdentification();
     setInterval(pollOrderStatus, 4000);
     setInterval(pollBillStatus, 4000);
     setInterval(pollWaiterStatus, 4000);
@@ -1069,12 +1285,20 @@ def _build_guest_menu_html(
 
 @router.get("/menu")
 def guest_menu(
-    token: str = Query(...),
+    token: str | None = Query(None),
+    table: str | None = Query(None, alias="table"),
+    table_number: str | None = Query(None, alias="tableNumber"),
+    table_id: str | None = Query(None, alias="tableId"),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
-    qr = _resolve_qr(db, token)
-    table = db.get(Table, qr.table_id)
-    if not table:
+    raw_token = token if isinstance(token, str) else None
+    raw_table = table if isinstance(table, str) else None
+    raw_table_num = table_number if isinstance(table_number, str) else None
+    raw_table_id = table_id if isinstance(table_id, str) else None
+    identifier = raw_token or raw_table or raw_table_num or raw_table_id or ""
+    qr = _resolve_qr(db, identifier)
+    table_obj = db.get(Table, qr.table_id)
+    if not table_obj:
         raise HTTPException(404, "Table not found")
 
     try:
@@ -1083,7 +1307,24 @@ def guest_menu(
     except Exception:
         restaurant_name = RESTAURANT_NAME
 
-    session = active_session_for_table(db, qr.table_id)
+    # Guarantee an active dining session for this table so guests can order right away
+    session = active_session_for_table(db, table_obj.id)
+    if not session:
+        from app.core.ids import new_id
+        session = DiningSession(
+            id=new_id(),
+            table_id=table_obj.id,
+            tenant_id=table_obj.tenant_id,
+            branch_id=table_obj.branch_id,
+            guest_name=f"Guest Table {table_obj.number}",
+            party_size=table_obj.capacity or 2,
+            status="ACTIVE",
+            seated_at=datetime.now(timezone.utc),
+        )
+        db.add(session)
+        table_obj.status = "ACTIVE"
+        db.commit()
+        db.refresh(session)
 
     items = menu_service.list_available_models(db)
     by_category: dict[str, list] = defaultdict(list)
@@ -1091,14 +1332,74 @@ def guest_menu(
         by_category[item.category].append(item)
 
     page = _build_guest_menu_html(
-        token=token,
-        table=table,
+        token=qr.token,
+        table=table_obj,
         restaurant_name=restaurant_name,
         items_by_category=dict(by_category),
         guest_name=session.guest_name if session else None,
         session_id=session.id if session else None,
     )
     return HTMLResponse(page)
+
+
+class GuestIdentifyPayload(CamelModel):
+    token: str
+    guest_name: str
+    party_size: int | None = None
+
+
+@router.post("/identify")
+@router.post("/session/guest-name")
+def update_guest_identification(
+    payload: GuestIdentifyPayload,
+    db: Session = Depends(get_db),
+):
+    qr = _resolve_qr(db, payload.token)
+    table = db.get(Table, qr.table_id)
+    if not table:
+        raise HTTPException(404, "Table not found")
+
+    session = active_session_for_table(db, table.id)
+    now = datetime.now(timezone.utc)
+    if not session:
+        from app.core.ids import new_id
+        session = DiningSession(
+            id=new_id(),
+            table_id=table.id,
+            tenant_id=getattr(table, "tenant_id", "org-demo"),
+            branch_id=getattr(table, "branch_id", None),
+            guest_name=payload.guest_name.strip(),
+            party_size=payload.party_size or table.capacity or 2,
+            status="ACTIVE",
+            seated_at=now,
+        )
+        db.add(session)
+    else:
+        session.guest_name = payload.guest_name.strip()
+        if payload.party_size and payload.party_size > 0:
+            session.party_size = payload.party_size
+
+    table.status = "ACTIVE"
+    db.commit()
+    db.refresh(session)
+
+    try:
+        from app.socket_manager import emit_sync
+        emit_sync(
+            "table_updated",
+            {"tableId": table.id, "status": "ACTIVE", "guestName": session.guest_name, "partySize": session.party_size},
+            room=table.tenant_id,
+        )
+    except Exception:
+        pass
+
+    return {
+        "success": True,
+        "guestName": session.guest_name,
+        "partySize": session.party_size,
+        "tableNumber": table.number,
+        "sessionId": session.id,
+    }
 
 
 @router.get("/orders")
