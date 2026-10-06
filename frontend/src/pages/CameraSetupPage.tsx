@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../api/client'
 import { FloorPlanMiniMap } from '../components/floor/FloorPlanMiniMap'
+import { DigitalFloorPlanView } from '../components/floor/DigitalFloorPlanView'
 import { LiveStreamPlayer } from '../components/vision/LiveStreamPlayer'
 import { useFloor } from '../context/FloorContext'
 import { useSocket } from '../context/SocketContext'
@@ -163,6 +164,7 @@ export function CameraSetupPage() {
   const [aiDetecting, setAiDetecting] = useState(false)
   const [aiReport, setAiReport] = useState<any | null>(null)
   const [suggestions, setSuggestions] = useState<AISuggestion[]>([])
+  const [selectedSuggestionId, setSelectedSuggestionId] = useState<string | null>(null)
   const [applyingApproved, setApplyingApproved] = useState(false)
   const [applyResultBanner, setApplyResultBanner] = useState<string | null>(null)
   const [floorPlanViewMode, setFloorPlanViewMode] = useState<'current' | 'ai_suggested' | 'overlay'>('overlay')
@@ -418,6 +420,13 @@ export function CameraSetupPage() {
       newUrl = '0'
     } else if (mode.id === 'SYNTHETIC') {
       newUrl = 'synthetic'
+    } else if (mode.id === 'DEMO_STREAM') {
+      const saved = localStorage.getItem('foh_camera_url')
+      if (saved && (saved.includes('youtube.com') || saved.includes('youtu.be'))) {
+        newUrl = saved
+      } else if (cameraUrl && (cameraUrl.includes('youtube.com') || cameraUrl.includes('youtu.be'))) {
+        newUrl = cameraUrl
+      }
     }
 
     setCameraUrl(newUrl)
@@ -430,9 +439,51 @@ export function CameraSetupPage() {
         await api.updateCamera(camId, {
           source_type: mode.id,
           stream_url: newUrl,
+          floor_id: floor?.id || 'floor-1',
         })
       } catch (e) {
         console.warn('Failed to update camera source in DB:', e)
+      }
+    }
+  }
+
+  async function handleAutoPersistUrl(url: string, modeId: string) {
+    if (!url.trim()) return
+    localStorage.setItem('foh_camera_url', url.trim())
+    localStorage.setItem('foh_selected_camera_mode', modeId)
+    const camId = selectedCameraId || (cameras[0]?.id ?? 'cam-t-1')
+    if (camId) {
+      try {
+        await api.updateCamera(camId, {
+          source_type: modeId,
+          stream_url: url.trim(),
+          floor_id: floor?.id || 'floor-1',
+        })
+      } catch (e) {
+        console.warn('Auto-persist URL failed:', e)
+      }
+    }
+  }
+
+  async function applyPresetUrl(url: string, modeId?: string) {
+    const targetMode = modeId || selectedModeId
+    if (modeId && modeId !== selectedModeId) {
+      setSelectedModeId(modeId)
+      localStorage.setItem('foh_selected_camera_mode', modeId)
+    }
+    setCameraUrl(url)
+    localStorage.setItem('foh_camera_url', url)
+    setSourceErrorWarning(null)
+    const camId = selectedCameraId || (cameras[0]?.id ?? 'cam-t-1')
+    if (camId) {
+      try {
+        await api.updateCamera(camId, {
+          source_type: targetMode,
+          stream_url: url,
+          floor_id: floor?.id || 'floor-1',
+        })
+      } catch (e) {
+        console.warn('Auto-persist preset failed:', e)
       }
     }
   }
@@ -473,11 +524,12 @@ export function CameraSetupPage() {
         floor_id: floor.id,
         override_stream_url: cameraUrl,
         source_type: selectedModeId,
-        min_confidence: 0.20,
+        min_confidence: 0.35,
         reconstruct_mode: reconstructMode,
       })
       setAiReport(report)
       await loadSuggestions(floor.id)
+      setFloorPlanViewMode('ai_suggested')
       setStreamNonce((n) => n + 1)
     } catch (err: any) {
       alert(`AI Floor Plan Detection failed: ${err.message || 'Unknown error'}`)
@@ -519,7 +571,7 @@ export function CameraSetupPage() {
         floor_id: floor.id,
         override_stream_url: cameraUrl,
         source_type: selectedModeId,
-        min_confidence: 0.20,
+        min_confidence: 0.35,
         replace_existing: reconstructMode,
       })
       if (res.success) {
@@ -658,6 +710,7 @@ export function CameraSetupPage() {
         await api.updateCamera(camId, {
           source_type: selectedModeId,
           stream_url: cameraUrl.trim(),
+          floor_id: floor?.id || 'floor-1',
         })
       }
       setUrlSaved(true)
@@ -994,6 +1047,9 @@ export function CameraSetupPage() {
             {selectedModeId === 'VIDEO_FILE' ? (
               <div style={{ display: 'flex', gap: '0.5rem', flex: 1, minWidth: '280px' }}>
                 <select
+                  id="camera-video-file-select"
+                  name="videoFile"
+                  aria-label="Select Video Clip"
                   className="input"
                   style={{ flex: 1, padding: '0.45rem 0.75rem', fontSize: '0.85rem' }}
                   value={cameraUrl}
@@ -1005,7 +1061,16 @@ export function CameraSetupPage() {
                     </option>
                   ))}
                 </select>
-                <input ref={fileInputRef} type="file" accept="video/*" onChange={handleFileUpload} style={{ display: 'none' }} />
+                <input
+                  id="camera-video-file-input"
+                  name="videoFileInput"
+                  aria-label="Upload Video Clip"
+                  ref={fileInputRef}
+                  type="file"
+                  accept="video/*"
+                  onChange={handleFileUpload}
+                  style={{ display: 'none' }}
+                />
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
@@ -1017,6 +1082,9 @@ export function CameraSetupPage() {
               </div>
             ) : selectedModeId === 'WEBCAM' ? (
               <select
+                id="camera-webcam-device-select"
+                name="webcamDevice"
+                aria-label="Select Webcam Device"
                 className="input"
                 style={{ flex: 1, minWidth: '240px', padding: '0.45rem 0.75rem', fontSize: '0.85rem' }}
                 value={cameraUrl}
@@ -1028,6 +1096,9 @@ export function CameraSetupPage() {
               </select>
             ) : selectedModeId === 'SYNTHETIC' ? (
               <input
+                id="camera-synthetic-url"
+                name="syntheticUrl"
+                aria-label="Synthetic Camera URL"
                 className="input"
                 style={{ flex: 1, minWidth: '240px', padding: '0.45rem 0.75rem', fontSize: '0.85rem', background: '#e2e8f0' }}
                 value="synthetic://dining-room-simulation"
@@ -1035,13 +1106,23 @@ export function CameraSetupPage() {
               />
             ) : (
               <input
+                id="camera-source-url"
+                name="cameraUrl"
+                aria-label="Camera Stream URL"
                 className="input"
                 style={{ flex: 1, minWidth: '260px', padding: '0.45rem 0.75rem', fontSize: '0.85rem' }}
                 placeholder={activeMode.default_url}
                 value={cameraUrl}
                 onChange={(e) => {
-                  setCameraUrl(e.target.value)
+                  const val = e.target.value
+                  setCameraUrl(val)
                   setSourceErrorWarning(null)
+                  localStorage.setItem('foh_camera_url', val.trim())
+                }}
+                onBlur={() => {
+                  if (cameraUrl.trim()) {
+                    void handleAutoPersistUrl(cameraUrl.trim(), selectedModeId)
+                  }
                 }}
               />
             )}
@@ -1068,6 +1149,8 @@ export function CameraSetupPage() {
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', background: reconstructMode ? '#eff6ff' : 'var(--surface-2)', border: reconstructMode ? '1.5px solid #3b82f6' : '1px solid var(--border)', borderRadius: '8px', padding: '0.35rem 0.65rem' }}>
               <input
                 id="reconstructToggle"
+                name="reconstructToggle"
+                aria-label="Wipe old floor plan & build clean from video"
                 type="checkbox"
                 checked={reconstructMode}
                 onChange={(e) => setReconstructMode(e.target.checked)}
@@ -1185,8 +1268,16 @@ export function CameraSetupPage() {
                 <button
                   type="button"
                   className="btn btn-ghost btn-sm"
+                  style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem', fontWeight: cameraUrl.includes('Sgt05K7f9TA') ? 700 : 400 }}
+                  onClick={() => applyPresetUrl('https://www.youtube.com/live/Sgt05K7f9TA?si=7m6ACIFo1r0vuW9x', 'DEMO_STREAM')}
+                >
+                  🔴 YouTube: Live Dining Stream
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
                   style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem', fontWeight: cameraUrl.includes('DBl7MmHlQK0') ? 700 : 400 }}
-                  onClick={() => setCameraUrl('https://www.youtube.com/watch?v=DBl7MmHlQK0')}
+                  onClick={() => applyPresetUrl('https://www.youtube.com/watch?v=DBl7MmHlQK0', 'DEMO_STREAM')}
                 >
                   ▶️ YouTube: Restaurant CCTV Feed
                 </button>
@@ -1194,7 +1285,7 @@ export function CameraSetupPage() {
                   type="button"
                   className="btn btn-ghost btn-sm"
                   style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem', fontWeight: cameraUrl === 'table_t-1.mp4' ? 700 : 400 }}
-                  onClick={() => setCameraUrl('table_t-1.mp4')}
+                  onClick={() => applyPresetUrl('table_t-1.mp4', 'VIDEO_FILE')}
                 >
                   🎬 Sample MP4 (table_t-1.mp4)
                 </button>
@@ -1202,7 +1293,7 @@ export function CameraSetupPage() {
                   type="button"
                   className="btn btn-ghost btn-sm"
                   style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem', fontWeight: cameraUrl === 'synthetic' ? 700 : 400 }}
-                  onClick={() => setCameraUrl('synthetic')}
+                  onClick={() => applyPresetUrl('synthetic', 'SYNTHETIC')}
                 >
                   🎮 Synthetic Simulation
                 </button>
@@ -1424,19 +1515,22 @@ export function CameraSetupPage() {
               </div>
 
               {floor && (
-                <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '1rem', minHeight: '360px', position: 'relative' }}>
-                  <FloorPlanMiniMap
+                <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '0.85rem', position: 'relative' }}>
+                  <DigitalFloorPlanView
                     floor={floor}
+                    suggestions={suggestions}
+                    viewMode={floorPlanViewMode}
                     selectedTableId={selectedTableId}
+                    selectedSuggestionId={selectedSuggestionId}
                     onSelectTable={(id) => setSelectedTableId(id)}
+                    onSelectSuggestion={(id) => {
+                      setSelectedSuggestionId(id)
+                      const s = suggestions.find((x) => x.id === id)
+                      if (s?.existing_table_id) setSelectedTableId(s.existing_table_id)
+                      const el = document.getElementById(`suggestion-card-${id}`)
+                      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+                    }}
                   />
-
-                  {floorPlanViewMode === 'overlay' && (
-                    <div style={{ marginTop: '0.75rem', fontSize: '0.78rem', color: '#475569', display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-                      <span>Existing digital tables shown with status badges.</span>
-                      <span>Ghosted indicators reflect physical CCTV observations.</span>
-                    </div>
-                  )}
                 </div>
               )}
             </div>
@@ -1534,8 +1628,24 @@ export function CameraSetupPage() {
                   else if (s.suggestion_type === 'SIZE_CHANGE') cardClass = 'ai-candidate-card--size'
                   else if (s.suggestion_type === 'UNCERTAIN') cardClass = 'ai-candidate-card--uncertain'
 
+                  const isSelected = selectedSuggestionId === s.id
+
                   return (
-                    <div key={s.id} className={`ai-candidate-card ${cardClass}`}>
+                    <div
+                      key={s.id}
+                      id={`suggestion-card-${s.id}`}
+                      className={`ai-candidate-card ${cardClass}`}
+                      onClick={() => {
+                        setSelectedSuggestionId(s.id)
+                        if (s.existing_table_id) setSelectedTableId(s.existing_table_id)
+                      }}
+                      style={{
+                        cursor: 'pointer',
+                        outline: isSelected ? '2px solid #2563eb' : undefined,
+                        boxShadow: isSelected ? '0 0 0 4px rgba(37, 99, 235, 0.2)' : undefined,
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
                         <div>
                           <strong style={{ fontSize: '0.95rem' }}>

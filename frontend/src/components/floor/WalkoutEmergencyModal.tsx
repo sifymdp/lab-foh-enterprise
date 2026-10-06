@@ -227,6 +227,7 @@ export function WalkoutEmergencyModal({
           {/* Optional Resolution Notes */}
           <div style={{ marginBottom: '24px' }}>
             <label
+              htmlFor="walkout-resolution-notes"
               style={{
                 display: 'block',
                 fontSize: '12px',
@@ -237,6 +238,9 @@ export function WalkoutEmergencyModal({
               Resolution Notes (Optional)
             </label>
             <input
+              id="walkout-resolution-notes"
+              name="resolutionNotes"
+              aria-label="Resolution Notes"
               type="text"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}

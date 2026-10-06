@@ -79,8 +79,8 @@ class Settings(BaseSettings):
     default_camera_url: str | None = None
 
     # Kitchen alert thresholds (minutes)
-    received_alert_minutes: float = 10.0
-    preparation_alert_minutes: float = 20.0
+    received_alert_minutes: float = 5.0
+    preparation_alert_minutes: float = 15.0
     ready_alert_minutes: float = 5.0
 
     # Customer self-service booking & OTP settings (Member 4 feature)

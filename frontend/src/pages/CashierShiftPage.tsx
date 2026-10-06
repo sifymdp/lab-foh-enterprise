@@ -135,8 +135,11 @@ export function CashierShiftPage() {
 
                 <form onSubmit={handleEndShift}>
                   <div className="field">
-                    <span>Declared Closing Cash (Total Till Balance)</span>
+                    <label htmlFor="shift-closing-cash" style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '4px' }}>Declared Closing Cash (Total Till Balance)</label>
                     <input
+                      id="shift-closing-cash"
+                      name="closingCash"
+                      aria-label="Declared Closing Cash"
                       className="input"
                       type="number"
                       placeholder="Declare total cash left in register"
@@ -146,8 +149,11 @@ export function CashierShiftPage() {
                     />
                   </div>
                   <div className="field">
-                    <span>Actual Physical Cash Counted</span>
+                    <label htmlFor="shift-actual-cash" style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '4px' }}>Actual Physical Cash Counted</label>
                     <input
+                      id="shift-actual-cash"
+                      name="actualCash"
+                      aria-label="Actual Physical Cash Counted"
                       className="input"
                       type="number"
                       placeholder="Count physical cash bills"
@@ -157,8 +163,11 @@ export function CashierShiftPage() {
                     />
                   </div>
                   <div className="field">
-                    <span>Shift Close Remarks</span>
+                    <label htmlFor="shift-close-remarks" style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '4px' }}>Shift Close Remarks</label>
                     <input
+                      id="shift-close-remarks"
+                      name="shiftCloseNotes"
+                      aria-label="Shift Close Remarks"
                       className="input"
                       type="text"
                       placeholder="Shortages, overages explanation"
@@ -177,8 +186,11 @@ export function CashierShiftPage() {
                 <h3 style={{ marginBottom: '1rem' }}>Open Cashier Shift</h3>
                 <form onSubmit={handleStartShift}>
                   <div className="field">
-                    <span>Opening Cash Drawer (₹)</span>
+                    <label htmlFor="shift-opening-cash" style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '4px' }}>Opening Cash Drawer (₹)</label>
                     <input
+                      id="shift-opening-cash"
+                      name="openingCash"
+                      aria-label="Opening Cash Drawer"
                       className="input"
                       type="number"
                       value={openingCash}
@@ -187,8 +199,11 @@ export function CashierShiftPage() {
                     />
                   </div>
                   <div className="field">
-                    <span>Shift Opening Remarks</span>
+                    <label htmlFor="shift-opening-remarks" style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '4px' }}>Shift Opening Remarks</label>
                     <input
+                      id="shift-opening-remarks"
+                      name="shiftOpeningNotes"
+                      aria-label="Shift Opening Remarks"
                       className="input"
                       type="text"
                       placeholder="E.g. standard float of ₹1000"

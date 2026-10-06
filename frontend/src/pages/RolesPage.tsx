@@ -1298,10 +1298,13 @@ export function RolesPage() {
           <div className="modal" style={{ maxWidth: '420px' }}>
             <h3 style={{ margin: '0 0 1rem' }}>Add Role</h3>
             <form onSubmit={handleCreateRole}>
-              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.35rem' }}>
+              <label htmlFor="new-role-name-input" style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.35rem' }}>
                 Role Name
               </label>
               <input
+                id="new-role-name-input"
+                name="newRoleName"
+                aria-label="Role Name"
                 className="input"
                 style={{ width: '100%', marginBottom: '1.25rem' }}
                 placeholder="e.g. Barista, Floor Supervisor"
@@ -1334,10 +1337,13 @@ export function RolesPage() {
             <form onSubmit={handleCreateCategory}>
               <div style={{ display: 'flex', gap: '0.6rem', marginBottom: '0.9rem' }}>
                 <div style={{ width: '75px' }}>
-                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.3rem' }}>
+                  <label htmlFor="new-cat-icon-select" style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.3rem' }}>
                     Icon
                   </label>
                   <select
+                    id="new-cat-icon-select"
+                    name="newCategoryIcon"
+                    aria-label="Category Icon"
                     className="input"
                     value={newCatIcon}
                     onChange={(e) => setNewCatIcon(e.target.value)}
@@ -1353,10 +1359,13 @@ export function RolesPage() {
                   </select>
                 </div>
                 <div style={{ flex: 1 }}>
-                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.3rem' }}>
+                  <label htmlFor="new-cat-label-input" style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.3rem' }}>
                     Category Label *
                   </label>
                   <input
+                    id="new-cat-label-input"
+                    name="newCategoryLabel"
+                    aria-label="Category Label"
                     className="input"
                     style={{ width: '100%' }}
                     placeholder="e.g. Bar & Beverage"
@@ -1368,10 +1377,13 @@ export function RolesPage() {
                 </div>
               </div>
 
-              <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, marginBottom: '0.3rem' }}>
+              <label htmlFor="new-cat-desc-input" style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, marginBottom: '0.3rem' }}>
                 Description
               </label>
               <input
+                id="new-cat-desc-input"
+                name="newCategoryDescription"
+                aria-label="Category Description"
                 className="input"
                 style={{ width: '100%', marginBottom: '1.25rem' }}
                 placeholder="Explain what this category module covers"
@@ -1401,10 +1413,13 @@ export function RolesPage() {
               Add a new actionable permission into <strong>{categories.find(c => c.id === targetCatIdForPerm)?.label}</strong>.
             </p>
             <form onSubmit={handleAddPermission}>
-              <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, marginBottom: '0.3rem' }}>
+              <label htmlFor="new-perm-title-input" style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, marginBottom: '0.3rem' }}>
                 Permission Title *
               </label>
               <input
+                id="new-perm-title-input"
+                name="newPermissionTitle"
+                aria-label="Permission Title"
                 className="input"
                 style={{ width: '100%', marginBottom: '0.9rem' }}
                 placeholder="e.g. Approve Complimentary Dessert"
@@ -1414,10 +1429,13 @@ export function RolesPage() {
                 autoFocus
               />
 
-              <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, marginBottom: '0.3rem' }}>
+              <label htmlFor="new-perm-code-input" style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, marginBottom: '0.3rem' }}>
                 Permission Key Code (Optional)
               </label>
               <input
+                id="new-perm-code-input"
+                name="newPermissionCode"
+                aria-label="Permission Key Code"
                 className="input"
                 style={{ width: '100%', marginBottom: '0.9rem' }}
                 placeholder={`e.g. ${targetCatIdForPerm}.approve_dessert`}
@@ -1425,10 +1443,13 @@ export function RolesPage() {
                 onChange={(e) => setNewPermCode(e.target.value)}
               />
 
-              <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, marginBottom: '0.3rem' }}>
+              <label htmlFor="new-perm-desc-input" style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, marginBottom: '0.3rem' }}>
                 Description
               </label>
               <input
+                id="new-perm-desc-input"
+                name="newPermissionDescription"
+                aria-label="Permission Description"
                 className="input"
                 style={{ width: '100%', marginBottom: '1.25rem' }}
                 placeholder="Explain what access this permission gives to staff"

@@ -454,6 +454,9 @@ export function BulkMenuModal({ isOpen, onClose, onSuccess, branchId }: BulkMenu
                   >
                     <input
                       ref={fileInputRef}
+                      id="bulk-menu-file-input"
+                      name="bulkMenuFile"
+                      aria-label="Upload menu Excel file"
                       type="file"
                       accept=".xlsx,.xls"
                       style={{ display: 'none' }}
@@ -792,8 +795,11 @@ export function BulkMenuModal({ isOpen, onClose, onSuccess, branchId }: BulkMenu
                           Choose whether to soft-deactivate them from the live menu. Historical orders remain intact.
                         </div>
                       </div>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>
+                      <label htmlFor="bulk-deactivate-missing" style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 600, fontSize: 13 }}>
                         <input
+                          id="bulk-deactivate-missing"
+                          name="deactivateMissing"
+                          aria-label="Deactivate missing items"
                           type="checkbox"
                           checked={deactivateMissing}
                           onChange={(e) => setDeactivateMissing(e.target.checked)}

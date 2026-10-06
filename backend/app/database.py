@@ -118,6 +118,10 @@ def migrate_schema() -> None:
                 ("notes",      "VARCHAR(500)"),
                 ("source",     "VARCHAR(10) DEFAULT 'bot'"),
                 ("approval_status", "VARCHAR(10) DEFAULT 'PENDING'"),
+                ("received_at", "DATETIME"),
+                ("preparing_at", "DATETIME"),
+                ("ready_at", "DATETIME"),
+                ("served_at", "DATETIME"),
             ]:
                 if col not in ord_cols:
                     conn.execute(text(f"ALTER TABLE orders ADD COLUMN {col} {typedef}"))

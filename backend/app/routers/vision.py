@@ -650,7 +650,9 @@ def get_floor_plan_suggestions(
     )
     if status_filter:
         query = query.where(FloorPlanSuggestion.status == status_filter.upper())
-    query = query.order_by(desc(FloorPlanSuggestion.created_at))
+    else:
+        query = query.where(FloorPlanSuggestion.status.in_(["PENDING", "APPROVED"]))
+    query = query.order_by(desc(FloorPlanSuggestion.created_at)).limit(30)
 
     suggestions = db.execute(query).scalars().all()
 
@@ -672,6 +674,18 @@ def get_floor_plan_suggestions(
                 }
 
         pos = json.loads(s.detected_position) if s.detected_position else {}
+        if not pos or pos.get("x") is None or pos.get("width") is None:
+            if existing_table:
+                pos = {
+                    "x": existing_table["x"],
+                    "y": existing_table["y"],
+                    "width": existing_table["width"],
+                    "height": existing_table["height"],
+                    "shape": existing_table.get("shape", "RECTANGLE"),
+                    "capacity": 4,
+                }
+            else:
+                pos = {"x": 100, "y": 100, "width": 110, "height": 75, "shape": "RECTANGLE", "capacity": 4}
         cbbox = json.loads(s.camera_bbox) if s.camera_bbox else None
 
         out.append({

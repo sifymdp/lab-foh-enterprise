@@ -698,7 +698,7 @@ export function AIBookingPage() {
               </button>
             </div>
 
-            <label className="field">
+            <label className="field" htmlFor="booking-contact-input">
               <span>
                 {contactMode === 'email'
                   ? 'Email address'
@@ -706,6 +706,9 @@ export function AIBookingPage() {
               </span>
 
               <input
+                id="booking-contact-input"
+                name="contactIdentifier"
+                aria-label={contactMode === 'email' ? 'Email address' : 'Mobile number'}
                 ref={emailInputRef}
                 className="input"
                 type={
@@ -776,10 +779,13 @@ export function AIBookingPage() {
               </div>
             )}
 
-            <label className="field">
+            <label className="field" htmlFor="booking-otp-code">
               <span>Verification code</span>
 
               <input
+                id="booking-otp-code"
+                name="verificationCode"
+                aria-label="Verification code"
                 className="input"
                 inputMode="numeric"
                 value={code}
@@ -1101,10 +1107,13 @@ export function AIBookingPage() {
 
       <section className="panel">
         <div className="customer-grid">
-          <label className="field">
+          <label className="field" htmlFor="booking-date">
             <span>Date</span>
 
             <input
+              id="booking-date"
+              name="bookingDate"
+              aria-label="Date"
               className="input"
               type="date"
               value={date}
@@ -1124,10 +1133,13 @@ export function AIBookingPage() {
             />
           </label>
 
-          <label className="field">
+          <label className="field" htmlFor="booking-time">
             <span>Time</span>
 
             <input
+              id="booking-time"
+              name="bookingTime"
+              aria-label="Time"
               className="input"
               type="time"
               value={time}
@@ -1147,10 +1159,13 @@ export function AIBookingPage() {
             />
           </label>
 
-          <label className="field">
+          <label className="field" htmlFor="booking-guests">
             <span>Guests</span>
 
             <input
+              id="booking-guests"
+              name="guestCount"
+              aria-label="Guests"
               className="input"
               type="number"
               min="1"
@@ -1172,10 +1187,13 @@ export function AIBookingPage() {
             />
           </label>
 
-          <label className="field">
+          <label className="field" htmlFor="booking-guest-name">
             <span>Name for booking</span>
 
             <input
+              id="booking-guest-name"
+              name="guestName"
+              aria-label="Name for booking"
               className="input"
               value={guestName}
               onChange={(e) =>

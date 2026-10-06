@@ -48,8 +48,11 @@ export function RevenuePage() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
         <h2>Revenue & Financial Summaries</h2>
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <span className="muted">Select Date:</span>
+          <label htmlFor="revenue-date-input" className="muted">Select Date:</label>
           <input
+            id="revenue-date-input"
+            name="revenueDate"
+            aria-label="Select Revenue Date"
             className="input"
             type="date"
             style={{ maxWidth: '160px', minHeight: '36px' }}

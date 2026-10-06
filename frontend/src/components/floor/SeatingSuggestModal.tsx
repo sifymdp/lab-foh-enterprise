@@ -46,8 +46,11 @@ export function SeatingSuggestModal({ onClose }: Props) {
         <h3 style={{ margin: '0 0 16px', fontSize: 18 }}>Suggest seating</h3>
         <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', marginBottom: 16 }}>
           <div style={{ flex: 1 }}>
-            <label style={{ fontSize: 13, fontWeight: 500, display: 'block', marginBottom: 4 }}>Party size</label>
+            <label htmlFor="suggest-party-size" style={{ fontSize: 13, fontWeight: 500, display: 'block', marginBottom: 4 }}>Party size</label>
             <input
+              id="suggest-party-size"
+              name="suggestPartySize"
+              aria-label="Party size"
               className="input"
               type="number"
               min={1}

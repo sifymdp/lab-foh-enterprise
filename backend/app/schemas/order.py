@@ -25,6 +25,7 @@ class OrderItemOut(CamelModel):
     notes: str | None = None
     allergy_flag: bool = False
     item_status: str = "RECEIVED"
+    prep_time_minutes: int = 15
 
 
 class OrderOut(CamelModel):
@@ -33,10 +34,15 @@ class OrderOut(CamelModel):
     table_id: str
     table_number: str | None = None
     placed_at: str
+    received_at: str | None = None
+    preparing_at: str | None = None
+    ready_at: str | None = None
+    served_at: str | None = None
     status: str
     source: str = "bot"
     approval_status: str = "PENDING"
     notes: str | None = None
+    estimated_prep_time_minutes: int = 15
     items: list[OrderItemOut]
 
 

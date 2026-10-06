@@ -319,6 +319,9 @@ export function CameraRoiModal({ table, onClose }: CameraRoiModalProps) {
           <h3 style={{ fontSize: 14 }}>1. Camera stream URL</h3>
           <div style={{ display: 'flex', gap: 8 }}>
             <input
+              id="camera-roi-url"
+              name="cameraStreamUrl"
+              aria-label="Camera stream URL"
               type="text"
               className="input"
               style={{ flex: 1 }}

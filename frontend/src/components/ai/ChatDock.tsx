@@ -106,6 +106,8 @@ export function ChatDock() {
         }}
       >
         <input
+          id="chat-dock-input"
+          name="chatMessage"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder="Ask about the floor…"

@@ -227,9 +227,30 @@ def _build_guest_menu_html(
                     </div>
                   </div>
                   <div class="item-custom-note-wrap" id="note-wrap-{html.escape(item.id)}" onclick="event.stopPropagation()">
-                    <input type="text" class="item-custom-note-input" id="note-{html.escape(item.id)}"
-                           placeholder="✎ Add special note (e.g. less spicy, no onion)..."
-                           oninput="updateItemNote('{html.escape(item.id)}', this.value)" />
+                    <div class="note-input-row">
+                      <span class="note-chef-icon" title="Special instructions for Chef">👨‍🍳</span>
+                      <input type="text" class="item-custom-note-input" id="note-{html.escape(item.id)}"
+                             placeholder="Add note for Chef (e.g. add oil, less spicy)..."
+                             oninput="handleNoteInputChange('{html.escape(item.id)}', this.value)"
+                             onkeydown="handleNoteKeyDown(event, '{html.escape(item.id)}')" />
+                      <button type="button" class="btn-save-note" id="btn-save-note-{html.escape(item.id)}"
+                              onclick="confirmItemNote('{html.escape(item.id)}')"
+                              title="Confirm and send note to kitchen">
+                        Add Note ↵
+                      </button>
+                    </div>
+                    <div class="note-chips-row">
+                      <button type="button" class="note-chip" onclick="quickApplyNote('{html.escape(item.id)}', 'Add oil')">💧 Add oil</button>
+                      <button type="button" class="note-chip" onclick="quickApplyNote('{html.escape(item.id)}', 'Less spicy')">🌶️ Less spicy</button>
+                      <button type="button" class="note-chip" onclick="quickApplyNote('{html.escape(item.id)}', 'Extra spicy')">🔥 Extra spicy</button>
+                      <button type="button" class="note-chip" onclick="quickApplyNote('{html.escape(item.id)}', 'No onion/garlic')">🧅 No onion</button>
+                      <button type="button" class="note-chip" onclick="quickApplyNote('{html.escape(item.id)}', 'Less oil')">🌿 Less oil</button>
+                      <button type="button" class="note-chip" onclick="quickApplyNote('{html.escape(item.id)}', 'Extra crisp')">✨ Extra crisp</button>
+                    </div>
+                    <div class="note-saved-badge" id="note-badge-{html.escape(item.id)}" style="display:none;">
+                      <span>👨‍🍳 <strong>Note for Chef:</strong> "<span id="note-badge-text-{html.escape(item.id)}"></span>"</span>
+                      <button type="button" class="note-saved-badge__clear" onclick="clearItemNote('{html.escape(item.id)}')" title="Clear note">✕</button>
+                    </div>
                   </div>
                 </article>
                 """
@@ -396,15 +417,62 @@ def _build_guest_menu_html(
       box-shadow: 0 4px 12px rgba(0,0,0,0.08);
     }}
     .item-custom-note-wrap {{
-      display: none; width: 100%; margin-top: 2px; padding-top: 8px; border-top: 1px dashed var(--line);
+      display: none; width: 100%; margin-top: 6px; padding-top: 8px; border-top: 1px dashed var(--line);
     }}
-    .item-custom-note-wrap.is-visible {{ display: flex; align-items: center; gap: 6px; }}
+    .item-custom-note-wrap.is-visible {{ display: flex; flex-direction: column; gap: 8px; }}
+    .note-input-row {{
+      display: flex; align-items: center; gap: 8px; width: 100%;
+    }}
+    .note-chef-icon {{
+      font-size: 1.15rem; flex-shrink: 0;
+    }}
     .item-custom-note-input {{
-      flex: 1; border: 1.5px solid #cbd5e1; border-radius: 8px; padding: 7px 11px;
-      font-size: 0.8rem; font-family: 'Inter', sans-serif; background: #f8fafc; color: var(--ink);
+      flex: 1; border: 1.5px solid #cbd5e1; border-radius: 8px; padding: 8px 12px;
+      font-size: 0.82rem; font-family: 'Inter', sans-serif; background: #f8fafc; color: var(--ink);
+      transition: all 0.15s ease;
     }}
     .item-custom-note-input:focus {{
       outline: none; border-color: var(--gold); background: #fff; box-shadow: 0 0 0 3px rgba(217,119,6,0.15);
+    }}
+    .btn-save-note {{
+      background: var(--gold); color: #fff; border: none; border-radius: 8px;
+      padding: 8px 14px; font-size: 0.8rem; font-weight: 700; cursor: pointer;
+      font-family: 'Inter', sans-serif; flex-shrink: 0; transition: all 0.15s ease;
+      display: inline-flex; align-items: center; gap: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      touch-action: manipulation;
+    }}
+    .btn-save-note:active {{ transform: scale(0.95); background: var(--gold-dark); }}
+    .btn-save-note.is-saved {{ background: #15803d; }}
+    .note-chips-row {{
+      display: flex; flex-wrap: wrap; gap: 6px; width: 100%;
+    }}
+    .note-chip {{
+      background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; border-radius: 999px;
+      padding: 4px 10px; font-size: 0.74rem; font-weight: 600; cursor: pointer;
+      font-family: 'Inter', sans-serif; transition: all 0.15s ease;
+      touch-action: manipulation;
+    }}
+    .note-chip:hover, .note-chip:active {{
+      background: #fef3c7; color: #92400e; border-color: #fde68a; transform: scale(0.96);
+    }}
+    .note-saved-badge {{
+      display: flex; align-items: center; justify-content: space-between;
+      background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 8px;
+      padding: 6px 10px; font-size: 0.78rem; color: #065f46; font-weight: 600;
+      animation: fadeIn 0.2s ease;
+    }}
+    .note-saved-badge__clear {{
+      background: transparent; border: none; color: #9ca3af; font-size: 0.85rem;
+      cursor: pointer; padding: 2px 6px; border-radius: 4px;
+    }}
+    .note-saved-badge__clear:hover {{ color: #dc2626; background: #fee2e2; }}
+    .order-overall-notes-box {{
+      margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--line);
+    }}
+    .review-chef-note {{
+      background: #fffbeb; color: #b45309; border: 1px solid #fde68a;
+      border-radius: 6px; padding: 4px 8px; font-size: 0.76rem; font-weight: 600;
+      margin-top: 4px; display: inline-flex; align-items: center; gap: 4px;
     }}
 
     .cart-bar {{
@@ -622,6 +690,12 @@ def _build_guest_menu_html(
         <button type="button" class="sheet__close" onclick="toggleOverlay('cart-overlay', false)">✕</button>
       </div>
       <div id="review-lines"></div>
+      <div class="order-overall-notes-box">
+        <label for="overall-order-notes" style="display:block;font-size:0.8rem;font-weight:700;color:var(--green);margin-bottom:6px;">
+          👨‍🍳 Special Instructions for Chef / Kitchen (Table Note)
+        </label>
+        <textarea id="overall-order-notes" rows="2" class="item-custom-note-input" style="width:100%;resize:none;font-size:0.82rem;" placeholder="e.g. Bring extra plates, serve appetizers first, please cook food less spicy..."></textarea>
+      </div>
       <div class="review-total"><span>Total</span><span id="review-total">₹0.00</span></div>
       <button type="button" id="confirm-order" class="btn-confirm" onclick="placeOrder()">Place Order</button>
     </div>
@@ -807,6 +881,82 @@ def _build_guest_menu_html(
       document.getElementById(id).classList.toggle('is-open', open);
     }}
 
+    function handleNoteInputChange(id, val) {{
+      const btn = document.getElementById('btn-save-note-' + id);
+      if (btn) {{
+        if (val.trim()) {{
+          btn.textContent = 'Add Note ↵';
+          btn.classList.remove('is-saved');
+        }} else {{
+          btn.textContent = 'Add Note ↵';
+          btn.classList.remove('is-saved');
+        }}
+      }}
+    }}
+
+    function handleNoteKeyDown(e, id) {{
+      if (e.key === 'Enter') {{
+        e.preventDefault();
+        confirmItemNote(id);
+      }}
+    }}
+
+    function confirmItemNote(id) {{
+      const inp = document.getElementById('note-' + id);
+      const val = (inp ? inp.value : '').trim();
+      const badge = document.getElementById('note-badge-' + id);
+      const badgeText = document.getElementById('note-badge-text-' + id);
+      const btn = document.getElementById('btn-save-note-' + id);
+
+      // Auto-increment quantity to 1 if not yet added
+      if (!cart[id] || cart[id].qty === 0) {{
+        changeQty(id, 1);
+      }}
+
+      updateItemNote(id, val);
+
+      if (val) {{
+        if (badge && badgeText) {{
+          badgeText.textContent = val;
+          badge.style.display = 'flex';
+        }}
+        if (btn) {{
+          btn.textContent = '✓ Saved';
+          btn.classList.add('is-saved');
+        }}
+        showToast('✓ Note saved: "' + val + '" will be sent to Chef!');
+      }} else {{
+        if (badge) badge.style.display = 'none';
+        if (btn) {{
+          btn.textContent = 'Add Note ↵';
+          btn.classList.remove('is-saved');
+        }}
+      }}
+    }}
+
+    function quickApplyNote(id, noteText) {{
+      const inp = document.getElementById('note-' + id);
+      if (inp) {{
+        inp.value = noteText;
+        confirmItemNote(id);
+        inp.focus();
+      }}
+    }}
+
+    function clearItemNote(id) {{
+      const inp = document.getElementById('note-' + id);
+      if (inp) inp.value = '';
+      const badge = document.getElementById('note-badge-' + id);
+      if (badge) badge.style.display = 'none';
+      const btn = document.getElementById('btn-save-note-' + id);
+      if (btn) {{
+        btn.textContent = 'Add Note ↵';
+        btn.classList.remove('is-saved');
+      }}
+      updateItemNote(id, '');
+      showToast('Note removed');
+    }}
+
     function updateItemNote(id, val) {{
       if (!cart[id]) {{
         const row = document.querySelector('.menu-item[data-id="' + id + '"]');
@@ -817,6 +967,7 @@ def _build_guest_menu_html(
       saveCart();
       const rowInput = document.getElementById('note-' + id);
       if (rowInput && rowInput.value !== val) rowInput.value = val;
+      renderCartBar();
     }}
 
     function changeQty(id, delta) {{
@@ -835,6 +986,21 @@ def _build_guest_menu_html(
         if (addBtn) addBtn.style.display = 'none';
         if (stepper) stepper.style.display = 'flex';
         if (wrap) wrap.classList.add('is-visible');
+        if (cart[id].notes) {{
+          const inp = document.getElementById('note-' + id);
+          if (inp && !inp.value) inp.value = cart[id].notes;
+          const badge = document.getElementById('note-badge-' + id);
+          const badgeText = document.getElementById('note-badge-text-' + id);
+          if (badge && badgeText) {{
+            badgeText.textContent = cart[id].notes;
+            badge.style.display = 'flex';
+          }}
+          const btn = document.getElementById('btn-save-note-' + id);
+          if (btn) {{
+            btn.textContent = '✓ Saved';
+            btn.classList.add('is-saved');
+          }}
+        }}
       }} else {{
         if (addBtn) addBtn.style.display = 'inline-block';
         if (stepper) stepper.style.display = 'none';
@@ -887,11 +1053,14 @@ def _build_guest_menu_html(
           + '<div style="flex:1;min-width:0;">'
           + '<div class="review-line__name">' + i.qty + '× ' + i.name + '</div>'
           + '<div class="review-line__price">₹' + i.price.toFixed(2) + ' each</div>'
-          + '<input type="text" class="item-custom-note-input" style="margin-top:6px;width:100%;font-size:0.78rem;" '
-          + 'placeholder="✎ Note (e.g. less spicy, no onion)..." '
+          + (i.notes ? '<div class="review-chef-note">👨‍🍳 <span>Note for Chef: <strong>' + noteVal + '</strong></span></div>' : '')
+          + '<div style="margin-top:6px;display:flex;gap:6px;align-items:center;">'
+          + '<input type="text" class="item-custom-note-input" style="font-size:0.78rem;" '
+          + 'placeholder="✎ Edit note for Chef..." '
           + 'value="' + noteVal + '" '
           + 'data-item-id="' + i.id + '" '
           + 'oninput="updateItemNote(this.dataset.itemId, this.value)" />'
+          + '</div>'
           + '</div>'
           + '<div class="review-line__price" style="font-weight:700;font-size:0.92rem;flex-shrink:0;">₹' + (i.price * i.qty).toFixed(2) + '</div>'
           + '</div>';
@@ -919,10 +1088,10 @@ def _build_guest_menu_html(
       const hasActive = orders.some(o => o.approvalStatus !== 'REJECTED' && o.status !== 'SERVED');
       trackBtn.classList.toggle('has-active', hasActive);
       const requestBtn = document.getElementById('request-bill-btn');
-      const approvedOrders = orders.filter(o => o.approvalStatus === 'APPROVED');
+      const approvedOrders = orders.filter(o => o.approvalStatus === 'APPROVED' || o.approvalStatus === 'PENDING');
       requestBtn.style.display = (approvedOrders.length > 0 && !hasExistingBill) ? 'block' : 'none';
       panel.innerHTML = orders.map(order => {{
-        const itemsText = order.items.map(i => i.quantity + '× ' + i.itemName).join(', ');
+        const itemsText = order.items.map(i => i.quantity + '× ' + i.itemName + (i.notes ? ' (' + i.notes + ')' : '')).join(', ');
         if (order.approvalStatus === 'REJECTED') {{
           const reason = order.notes ? ': ' + order.notes : '';
           return '<div class="status-tracker rejected">'
@@ -941,6 +1110,7 @@ def _build_guest_menu_html(
         }}).join('');
         return '<div class="status-tracker">'
           + '<div class="status-tracker__items">' + itemsText + '</div>'
+          + (order.notes ? '<div style="font-size:0.78rem;color:#b45309;background:#fffbeb;padding:4px 8px;border-radius:6px;margin-bottom:6px;border:1px solid #fde68a;">📝 Table Note: ' + order.notes + '</div>' : '')
           + '<div class="status-steps">' + steps + '</div></div>';
       }}).join('');
     }}
@@ -968,13 +1138,15 @@ def _build_guest_menu_html(
       if (!entries.length) return;
       const btn = document.getElementById('confirm-order');
       btn.disabled = true;
-      btn.textContent = 'Sending…';
+      btn.textContent = 'Sending to Kitchen…';
+      const overallNotes = (document.getElementById('overall-order-notes') ? document.getElementById('overall-order-notes').value : '').trim() || null;
       try {{
         const res = await fetch(API_BASE + '/orders?token=' + encodeURIComponent(CONFIG.token), {{
           method: 'POST',
           headers: {{ 'Content-Type': 'application/json' }},
           body: JSON.stringify({{
             tableId: CONFIG.tableId,
+            notes: overallNotes,
             items: entries.map(i => ({{
               menuItemId: i.id,
               quantity: i.qty,
@@ -986,11 +1158,24 @@ def _build_guest_menu_html(
           const err = await res.json().catch(() => ({{}}));
           throw new Error(err.detail || res.statusText);
         }}
-        Object.keys(cart).forEach(k => {{ cart[k].qty = 0; const el = document.getElementById('qty-' + k); if (el) el.textContent = '0'; }});
+        Object.keys(cart).forEach(k => {{
+          cart[k].qty = 0;
+          cart[k].notes = '';
+          const el = document.getElementById('qty-' + k);
+          if (el) el.textContent = '0';
+          const badge = document.getElementById('note-badge-' + k);
+          if (badge) badge.style.display = 'none';
+          const inp = document.getElementById('note-' + k);
+          if (inp) inp.value = '';
+          const btnSave = document.getElementById('btn-save-note-' + k);
+          if (btnSave) {{ btnSave.textContent = 'Add Note ↵'; btnSave.classList.remove('is-saved'); }}
+        }});
+        const overallInp = document.getElementById('overall-order-notes');
+        if (overallInp) overallInp.value = '';
         renderCartBar();
         saveCart();
         toggleOverlay('cart-overlay', false);
-        showToast('Order placed — thank you!');
+        showToast('✓ Order placed! Sent to Kitchen & Chef with your notes.');
         pollOrderStatus();
       }} catch (e) {{
         showToast(e.message || 'Could not place order', true);

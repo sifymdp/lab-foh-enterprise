@@ -231,8 +231,11 @@ export function SettingsPage() {
               <h4 style={{ margin: '0 0 0.75rem 0', fontSize: '0.95rem' }}>Create New Festival Promo Preset</h4>
               <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr 120px auto', gap: '0.75rem', alignItems: 'center' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.2rem' }}>Icon</label>
+                  <label htmlFor="settings-fest-icon" style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.2rem' }}>Icon</label>
                   <select
+                    id="settings-fest-icon"
+                    name="newFestIcon"
+                    aria-label="Festival Icon"
                     className="input"
                     value={newFestIcon}
                     onChange={(e) => setNewFestIcon(e.target.value)}
@@ -250,8 +253,11 @@ export function SettingsPage() {
                   </select>
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.2rem' }}>Festival / Promo Name</label>
+                  <label htmlFor="settings-fest-name" style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.2rem' }}>Festival / Promo Name</label>
                   <input
+                    id="settings-fest-name"
+                    name="newFestName"
+                    aria-label="Festival / Promo Name"
                     type="text"
                     className="input"
                     placeholder="e.g. Pongal Celebration, Holi Special..."
@@ -261,8 +267,11 @@ export function SettingsPage() {
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.2rem' }}>Discount %</label>
+                  <label htmlFor="settings-fest-percent" style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.2rem' }}>Discount %</label>
                   <input
+                    id="settings-fest-percent"
+                    name="newFestPercent"
+                    aria-label="Discount Percentage"
                     type="number"
                     step="0.5"
                     min="1"
@@ -286,10 +295,13 @@ export function SettingsPage() {
           {/* Active Festival Selector */}
           <div style={{ background: 'var(--surface-2)', padding: '1rem', borderRadius: '8px', marginBottom: '1.25rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
             <div>
-              <strong style={{ fontSize: '0.9rem' }}>🌟 Default Active Festival on Checkout:</strong>
+              <label htmlFor="settings-active-festival" style={{ fontSize: '0.9rem', fontWeight: 700, display: 'block', cursor: 'pointer' }}>🌟 Default Active Festival on Checkout:</label>
               <div className="muted" style={{ fontSize: '0.8rem' }}>Highlights this festival discount automatically for cashier staff</div>
             </div>
             <select
+              id="settings-active-festival"
+              name="activeFestivalId"
+              aria-label="Default Active Festival on Checkout"
               className="input"
               value={discountSettings.active_festival_id || ''}
               onChange={(e) => setDiscountSettings({ ...discountSettings, active_festival_id: e.target.value || null })}
@@ -336,8 +348,11 @@ export function SettingsPage() {
 
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginTop: '0.75rem' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                      <span className="muted" style={{ fontSize: '0.85rem' }}>Discount:</span>
+                      <label htmlFor={`preset-percent-${preset.id}`} className="muted" style={{ fontSize: '0.85rem' }}>Discount:</label>
                       <input
+                        id={`preset-percent-${preset.id}`}
+                        name={`presetPercent_${preset.id}`}
+                        aria-label={`Discount percent for ${preset.name}`}
                         type="number"
                         step="0.5"
                         min="0"
@@ -351,8 +366,11 @@ export function SettingsPage() {
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.8rem', cursor: 'pointer' }}>
+                      <label htmlFor={`preset-active-${preset.id}`} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.8rem', cursor: 'pointer' }}>
                         <input
+                          id={`preset-active-${preset.id}`}
+                          name={`presetActive_${preset.id}`}
+                          aria-label={`Toggle active for ${preset.name}`}
                           type="checkbox"
                           checked={preset.active}
                           onChange={() => handleTogglePreset(preset.id)}
@@ -382,9 +400,11 @@ export function SettingsPage() {
             <span>🛡️</span> Manual Discount Thresholds & Approval Rules
           </h3>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '1.5rem' }}>
-            <label className="field">
+            <label className="field" htmlFor="settings-cashier-max-discount">
               <span>Cashier Auto-Discount Limit (%)</span>
               <input
+                id="settings-cashier-max-discount"
+                name="cashierMaxDiscount"
                 type="number"
                 step="0.5"
                 className="input"
@@ -394,9 +414,11 @@ export function SettingsPage() {
               <span className="muted" style={{ fontSize: '0.75rem', marginTop: '0.2rem' }}>Cashiers can apply up to this % without manager pin</span>
             </label>
 
-            <label className="field">
+            <label className="field" htmlFor="settings-manager-max-discount">
               <span>Manager Auto-Discount Limit (%)</span>
               <input
+                id="settings-manager-max-discount"
+                name="managerMaxDiscount"
                 type="number"
                 step="0.5"
                 className="input"
@@ -406,9 +428,11 @@ export function SettingsPage() {
               <span className="muted" style={{ fontSize: '0.75rem', marginTop: '0.2rem' }}>Maximum % a manager can authorize directly</span>
             </label>
 
-            <label className="field">
+            <label className="field" htmlFor="settings-approval-above-percent">
               <span>Require Manager Approval Above (%)</span>
               <input
+                id="settings-approval-above-percent"
+                name="approvalAbovePercent"
                 type="number"
                 step="0.5"
                 className="input"
@@ -418,9 +442,11 @@ export function SettingsPage() {
               <span className="muted" style={{ fontSize: '0.75rem', marginTop: '0.2rem' }}>Triggers authorization request if exceeded</span>
             </label>
 
-            <label className="field">
+            <label className="field" htmlFor="settings-approval-above-amount">
               <span>Require Manager Approval Above Amount (₹)</span>
               <input
+                id="settings-approval-above-amount"
+                name="approvalAboveAmount"
                 type="number"
                 step="10"
                 className="input"
@@ -438,18 +464,22 @@ export function SettingsPage() {
             <span>🧾</span> General Billing & Taxes
           </h3>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '1.5rem', marginBottom: '1.5rem' }}>
-            <label className="field">
+            <label className="field" htmlFor="settings-billing-currency">
               <span>Currency Symbol</span>
               <input
+                id="settings-billing-currency"
+                name="billingCurrency"
                 type="text"
                 className="input"
                 value={billingSettings.currency}
                 onChange={(e) => setBillingSettings({ ...billingSettings, currency: e.target.value })}
               />
             </label>
-            <label className="field">
+            <label className="field" htmlFor="settings-tax-rate">
               <span>GST / Tax Rate (%)</span>
               <input
+                id="settings-tax-rate"
+                name="taxRate"
                 type="number"
                 step="0.1"
                 className="input"
@@ -457,9 +487,11 @@ export function SettingsPage() {
                 onChange={(e) => setBillingSettings({ ...billingSettings, tax_rate: parseFloat(e.target.value) || 0 })}
               />
             </label>
-            <label className="field">
+            <label className="field" htmlFor="settings-service-charge-rate">
               <span>Service Charge Rate (%)</span>
               <input
+                id="settings-service-charge-rate"
+                name="serviceChargeRate"
                 type="number"
                 step="0.1"
                 className="input"
@@ -469,18 +501,22 @@ export function SettingsPage() {
             </label>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
-            <label className="field">
+            <label className="field" htmlFor="settings-receipt-header">
               <span>Receipt Header Message</span>
               <input
+                id="settings-receipt-header"
+                name="receiptHeader"
                 type="text"
                 className="input"
                 value={billingSettings.receipt_header}
                 onChange={(e) => setBillingSettings({ ...billingSettings, receipt_header: e.target.value })}
               />
             </label>
-            <label className="field">
+            <label className="field" htmlFor="settings-receipt-footer">
               <span>Receipt Footer Message</span>
               <input
+                id="settings-receipt-footer"
+                name="receiptFooter"
                 type="text"
                 className="input"
                 value={billingSettings.receipt_footer}
@@ -497,11 +533,14 @@ export function SettingsPage() {
           </h3>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '1rem' }}>
             {['CASH', 'CARD', 'UPI', 'QR', 'ONLINE'].map((key) => (
-              <label key={key} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', background: 'var(--surface-2)', padding: '1rem', borderRadius: 'var(--radius)', border: '1px solid var(--border)', cursor: 'pointer' }}>
+              <label key={key} htmlFor={`settings-payment-${key.toLowerCase()}`} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', background: 'var(--surface-2)', padding: '1rem', borderRadius: 'var(--radius)', border: '1px solid var(--border)', cursor: 'pointer' }}>
                 <span style={{ fontWeight: 600, marginBottom: '0.5rem' }}>
                   {key === 'CASH' ? '💵 Cash' : key === 'CARD' ? '💳 Card' : key === 'UPI' ? '📱 UPI' : key === 'QR' ? '📱 QR Code' : '🌐 Online'}
                 </span>
                 <input
+                  id={`settings-payment-${key.toLowerCase()}`}
+                  name={`payment_${key.toLowerCase()}`}
+                  aria-label={`Enable ${key} payment method`}
                   type="checkbox"
                   checked={(paymentSettings as any)[key]}
                   onChange={(e) => setPaymentSettings({ ...paymentSettings, [key]: e.target.checked })}

@@ -7,12 +7,22 @@ from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.core.deps import bearer_scheme, get_current_user, require_permission
+from app.core.deps import (
+    bearer_scheme,
+    get_current_user,
+    require_any_permission,
+    require_kitchen_access,
+    require_permission,
+)
 from app.core.security import decode_token
 from app.core.permissions import (
+    PERM_KDS_BUMP,
+    PERM_KITCHEN_MANAGE,
     PERM_KITCHEN_UPDATE,
+    PERM_KITCHEN_VIEW,
     PERM_ORDERS_CREATE,
     PERM_ORDERS_SERVE,
+    PERM_ORDERS_UPDATE,
     PERM_ORDERS_VIEW,
     normalize_role,
 )
@@ -51,6 +61,7 @@ class OrderStatusIn(BaseModel):
 def list_orders(
     table_id: str | None = Query(None),
     session_id: str | None = Query(None),
+    approval_status: str | None = Query(None),
     db: Session = Depends(get_db),
     user: User = Depends(require_permission(PERM_ORDERS_VIEW)),
 ) -> list[OrderOut]:
@@ -60,13 +71,14 @@ def list_orders(
         session_id=session_id,
         tenant_id=user.tenant_id,
         branch_id=user.branch_id,
+        approval_status=approval_status,
     )
 
 
 @router.get("/kitchen", response_model=list[OrderOut])
 def kitchen_orders(
     db: Session = Depends(get_db),
-    user: User = Depends(require_permission(PERM_KITCHEN_UPDATE)),
+    user: User = Depends(require_kitchen_access),
 ) -> list[OrderOut]:
     """Kitchen view: all active (non-SERVED) orders for the branch."""
     from app.models.order import Order
@@ -82,52 +94,22 @@ def kitchen_orders(
         q = q.filter(Order.branch_id == user.branch_id)
     orders = q.order_by(Order.placed_at.asc()).all()
 
-    from app.schemas.order import OrderOut, OrderItemOut
-    from app.models.table import Table
+    from app.services import kitchen_alert_service
+    kitchen_alert_service.evaluate_kitchen_alerts(db)
 
-    table_ids = [o.table_id for o in orders if o.table_id]
-    tables_map = {t.id: t.number for t in db.query(Table).filter(Table.id.in_(table_ids)).all()} if table_ids else {}
-
-    result = []
-    for o in orders:
-        table_num = tables_map.get(o.table_id)
-        result.append(
-            OrderOut(
-                id=o.id,
-                sessionId=o.session_id,
-                tableId=o.table_id,
-                tableNumber=table_num,
-                status=o.status,
-                placedAt=o.placed_at.isoformat(),
-                source=getattr(o, "source", "waiter") or "waiter",
-                approvalStatus=getattr(o, "approval_status", "APPROVED") or "APPROVED",
-                items=[
-                    OrderItemOut(
-                        id=i.id,
-                        itemName=i.item_name,
-                        quantity=i.quantity,
-                        unitPrice=float(i.unit_price),
-                        station=getattr(i, "station", None),
-                        notes=getattr(i, "notes", None),
-                        allergyFlag=bool(getattr(i, "allergy_flag", False)),
-                        itemStatus=getattr(i, "item_status", "RECEIVED") or "RECEIVED",
-                    )
-                    for i in o.items
-                ],
-            )
-        )
-    return result
+    return [order_service._order_to_out(o, db) for o in orders]
 
 
-@router.patch("/{order_id}/status")
+@router.patch("/{order_id}/status", response_model=OrderOut)
 def update_order_status(
     order_id: str,
     body: OrderStatusIn,
     db: Session = Depends(get_db),
-    user: User = Depends(require_permission(PERM_KITCHEN_UPDATE)),
+    user: User = Depends(require_any_permission(PERM_KITCHEN_UPDATE, PERM_ORDERS_UPDATE, PERM_ORDERS_SERVE, PERM_KDS_BUMP, PERM_KITCHEN_MANAGE)),
 ):
     """Chef/Cook/Waiter updates order status through kitchen workflow."""
     from app.models.order import Order
+    from app.services import kitchen_alert_service
 
     order = (
         db.query(Order)
@@ -147,12 +129,8 @@ def update_order_status(
         )
 
     role = normalize_role(user.role)
-    allowed_transitions: dict = {}
-
-    if role in ("CHEF", "OWNER", "MANAGER"):
+    if role in ("CHEF", "OWNER", "MANAGER", "WAITER", "SUPERVISOR", "HOST"):
         allowed_transitions = CHEF_TRANSITIONS
-    elif role in ("WAITER", "SUPERVISOR", "HOST"):
-        allowed_transitions = WAITER_TRANSITIONS
     else:
         raise HTTPException(status_code=403, detail="You are not allowed to update kitchen order status")
 
@@ -169,7 +147,11 @@ def update_order_status(
     if hasattr(order, "notes") and body.notes:
         order.notes = body.notes
 
+    # Record timing timestamps & trigger alert lifecycle transitions
+    kitchen_alert_service.on_order_status_transition(db, order, new_status)
+
     db.commit()
+    db.refresh(order)
 
     log_action(
         db, user.id, user.tenant_id, user.branch_id,
@@ -177,12 +159,30 @@ def update_order_status(
         old_value={"status": old_status},
         new_value={"status": new_status},
     )
+
+    order_out = order_service._order_to_out(order, db)
+    payload = order_out.model_dump(by_alias=True)
+    table = db.get(Table, order.table_id) if order.table_id else None
+
+    # Broadcast to all floor rooms and connected clients
+    emit_sync(
+        "order_status_updated",
+        payload,
+        room="*",
+    )
     emit_sync(
         "order.status.changed",
-        {"orderId": order_id, "oldStatus": old_status, "newStatus": new_status},
-        room=user.tenant_id,
+        {"orderId": order_id, "oldStatus": old_status, "newStatus": new_status, "order": payload},
+        room="*",
     )
-    return {"orderId": order_id, "status": new_status}
+    if new_status == "SERVED":
+        emit_sync(
+            "order_served",
+            {"id": order_id, "orderId": order_id, "order": payload},
+            room="*",
+        )
+
+    return order_out
 
 
 @router.post("", response_model=OrderOut)

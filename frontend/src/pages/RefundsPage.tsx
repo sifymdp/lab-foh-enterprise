@@ -124,8 +124,10 @@ export function RefundsPage() {
               <h3 style={{ marginBottom: '1.5rem' }}>New Approval Request</h3>
               <form onSubmit={handleCreateRequest}>
                 <div className="field">
-                  <span>Request Type</span>
+                  <label htmlFor="refund-request-type">Request Type</label>
                   <select
+                    id="refund-request-type"
+                    name="requestType"
                     className="input"
                     value={requestType}
                     onChange={(e) => setRequestType(e.target.value as any)}
@@ -136,8 +138,10 @@ export function RefundsPage() {
                   </select>
                 </div>
                 <div className="field">
-                  <span>Bill ID</span>
+                  <label htmlFor="refund-bill-id">Bill ID</label>
                   <input
+                    id="refund-bill-id"
+                    name="billId"
                     className="input"
                     type="text"
                     placeholder="Enter bill UUID"
@@ -148,8 +152,10 @@ export function RefundsPage() {
                 </div>
                 {requestType === 'REFUND' && (
                   <div className="field">
-                    <span>Payment ID (Optional)</span>
+                    <label htmlFor="refund-payment-id">Payment ID (Optional)</label>
                     <input
+                      id="refund-payment-id"
+                      name="paymentId"
                       className="input"
                       type="text"
                       placeholder="Enter payment UUID"
@@ -160,8 +166,10 @@ export function RefundsPage() {
                 )}
                 {requestType !== 'CANCELLATION' && (
                   <div className="field">
-                    <span>Amount (₹)</span>
+                    <label htmlFor="refund-amount">Amount (₹)</label>
                     <input
+                      id="refund-amount"
+                      name="amount"
                       className="input"
                       type="number"
                       placeholder="Leave blank for full amount"
@@ -171,8 +179,10 @@ export function RefundsPage() {
                   </div>
                 )}
                 <div className="field">
-                  <span>Justification Reason</span>
+                  <label htmlFor="refund-reason">Justification Reason</label>
                   <input
+                    id="refund-reason"
+                    name="reason"
                     className="input"
                     type="text"
                     placeholder="Provide explanation for management review"
@@ -260,8 +270,10 @@ export function RefundsPage() {
                       </p>
                     )}
                     <div className="field">
-                      <span>Resolution/Approval Notes</span>
+                      <label htmlFor="refund-resolution-notes">Resolution/Approval Notes</label>
                       <input
+                        id="refund-resolution-notes"
+                        name="resolutionNotes"
                         className="input"
                         type="text"
                         placeholder="Explain approval or reject reason..."

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
 import { reservationsApi } from '../../api/extensions'
+import { useAuth } from '../../context/AuthContext'
 
 interface SearchResult {
   id: string
@@ -12,12 +13,17 @@ interface SearchResult {
 }
 
 export function GlobalSearch() {
+  const { user } = useAuth()
   const [isOpen, setIsOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<SearchResult[]>([])
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
   const inputRef = useRef<HTMLInputElement>(null)
+
+  const userPerms = new Set((user as any)?.permissions ?? [])
+  const canViewBills = user?.role === 'OWNER' || userPerms.has('billing.view')
+  const canViewReservations = user?.role === 'OWNER' || userPerms.has('booking.view') || userPerms.has('reservations.manage')
 
   // Keyboard shortcut Ctrl+K / Cmd+K
   useEffect(() => {
@@ -54,8 +60,8 @@ export function GlobalSearch() {
         const q = query.toLowerCase().trim()
         const [floorRes, bills, resList] = await Promise.all([
           api.getFloor().catch(() => null),
-          api.getBills().catch(() => []),
-          reservationsApi.list().catch(() => []),
+          canViewBills ? api.getBills().catch(() => []) : Promise.resolve([]),
+          canViewReservations ? reservationsApi.list().catch(() => []) : Promise.resolve([]),
         ])
 
         const tables = floorRes?.tables || []
@@ -194,6 +200,9 @@ export function GlobalSearch() {
               <span style={{ fontSize: '1.2rem', marginRight: '0.5rem' }}>🔍</span>
               <input
                 ref={inputRef}
+                id="global-search-input"
+                name="globalSearchQuery"
+                aria-label="Search tables, bills, orders, or guests"
                 type="text"
                 placeholder="Search tables, bills, orders, or guests..."
                 value={query}

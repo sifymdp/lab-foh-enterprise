@@ -39,6 +39,9 @@ export function ReportsPage() {
 
       <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 24 }}>
         <input
+          id="reports-date-input"
+          name="reportsDate"
+          aria-label="Report Date"
           type="date"
           className="input"
           value={date}

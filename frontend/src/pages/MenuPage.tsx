@@ -494,6 +494,9 @@ export function MenuPage() {
             🔍
           </span>
           <input
+            id="menu-search-input"
+            name="menuSearchQuery"
+            aria-label="Search dishes, ingredients, pairings"
             type="text"
             className="input"
             placeholder="Search dishes, ingredients, pairings..."
@@ -591,6 +594,9 @@ export function MenuPage() {
         {/* Sort & View Mode */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
           <select
+            id="menu-sort-by"
+            name="menuSortBy"
+            aria-label="Sort menu items"
             className="input"
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value as any)}
@@ -996,10 +1002,13 @@ export function MenuPage() {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: '0.35rem' }}>
+                <label htmlFor="menu-form-name" style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: '0.35rem' }}>
                   Name *
                 </label>
                 <input
+                  id="menu-form-name"
+                  name="menuItemName"
+                  aria-label="Menu Item Name"
                   className="input"
                   value={form.name}
                   onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
@@ -1011,10 +1020,13 @@ export function MenuPage() {
 
               <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '0.75rem' }}>
                 <div>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: '0.35rem' }}>
+                  <label htmlFor="menu-form-category" style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: '0.35rem' }}>
                     Category *
                   </label>
                   <select
+                    id="menu-form-category"
+                    name="menuItemCategory"
+                    aria-label="Menu Item Category"
                     className="input"
                     value={form.category}
                     onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
@@ -1029,12 +1041,15 @@ export function MenuPage() {
                 </div>
 
                 <div>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: '0.35rem' }}>
+                  <label htmlFor="menu-form-price" style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: '0.35rem' }}>
                     Price (₹) *
                   </label>
                   <div style={{ position: 'relative' }}>
                     <span style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', fontWeight: 700, color: 'var(--text-muted)' }}>₹</span>
                     <input
+                      id="menu-form-price"
+                      name="menuItemPrice"
+                      aria-label="Menu Item Price"
                       className="input"
                       type="number"
                       step="0.01"
@@ -1049,10 +1064,13 @@ export function MenuPage() {
               </div>
 
               <div>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: '0.35rem' }}>
+                <label htmlFor="menu-form-description" style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: '0.35rem' }}>
                   Description
                 </label>
                 <textarea
+                  id="menu-form-description"
+                  name="menuItemDescription"
+                  aria-label="Menu Item Description"
                   className="input"
                   rows={3}
                   value={form.description}
@@ -1064,10 +1082,13 @@ export function MenuPage() {
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', alignItems: 'center', background: 'var(--surface-2)', padding: '0.75rem 1rem', borderRadius: '10px' }}>
                 <div>
-                  <label style={{ fontSize: '0.75rem', fontWeight: 600, display: 'block', color: 'var(--text-muted)', marginBottom: '0.2rem' }}>
+                  <label htmlFor="menu-form-display-order" style={{ fontSize: '0.75rem', fontWeight: 600, display: 'block', color: 'var(--text-muted)', marginBottom: '0.2rem' }}>
                     Display Order
                   </label>
                   <input
+                    id="menu-form-display-order"
+                    name="menuItemDisplayOrder"
+                    aria-label="Display Order"
                     className="input"
                     type="number"
                     min="1"
@@ -1078,8 +1099,11 @@ export function MenuPage() {
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.5rem' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600 }}>
+                  <label htmlFor="menu-form-available" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600 }}>
                     <input
+                      id="menu-form-available"
+                      name="menuItemAvailable"
+                      aria-label="Item Available"
                       type="checkbox"
                       checked={form.available}
                       onChange={(e) => setForm((f) => ({ ...f, available: e.target.checked }))}

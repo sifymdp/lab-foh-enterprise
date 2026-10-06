@@ -64,10 +64,50 @@ export function KitchenDashboard() {
                       {o.status}
                     </span>
                   </div>
+                  {o.notes && (
+                    <div style={{
+                      background: 'rgba(245, 158, 11, 0.12)',
+                      border: '1px solid rgba(245, 158, 11, 0.3)',
+                      color: '#b45309',
+                      borderRadius: '6px',
+                      padding: '0.45rem 0.65rem',
+                      fontSize: '0.82rem',
+                      fontWeight: 600,
+                      marginBottom: '0.75rem',
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: '0.4rem',
+                      lineHeight: 1.35
+                    }}>
+                      <span>📝</span>
+                      <span><strong>Chef Table Note:</strong> {o.notes}</span>
+                    </div>
+                  )}
                   <div style={{ marginBottom: '1rem' }}>
                     {(o.items || []).map((item: any, idx: number) => (
-                      <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', margin: '0.25rem 0', fontSize: '0.92rem' }}>
-                        <span>{item.menuItemName || item.menu_item_name || item.menuItemId || item.menu_item_id || 'Item'} <strong>x{item.quantity}</strong></span>
+                      <div key={idx} style={{ margin: '0.45rem 0', fontSize: '0.92rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontWeight: 600 }}>{item.itemName || item.item_name || item.menuItemName || item.menu_item_name || item.menuItemId || item.menu_item_id || 'Item'}</span>
+                          <strong style={{ color: 'var(--primary, #d97706)' }}>x{item.quantity}</strong>
+                        </div>
+                        {item.notes && (
+                          <div style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.35rem',
+                            background: '#fef3c7',
+                            border: '1px solid #fde68a',
+                            color: '#92400e',
+                            borderRadius: '4px',
+                            padding: '0.2rem 0.5rem',
+                            fontSize: '0.78rem',
+                            fontWeight: 600,
+                            marginTop: '0.2rem'
+                          }}>
+                            <span>👨‍🍳</span>
+                            <span><strong>Note:</strong> {item.notes}</span>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>

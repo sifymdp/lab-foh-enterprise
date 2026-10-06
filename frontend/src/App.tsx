@@ -36,6 +36,7 @@ import { BillDetailPage } from './pages/BillDetailPage'
 import { KDSPage } from './pages/KDSPage'
 import { KitchenPage } from './pages/KitchenPage'
 import { AIBookingPage } from './pages/AIBookingPage'
+import { AIAlertsPage } from './pages/AIAlertsPage'
 
 function DashboardSwitcher() {
   const { user } = useAuth()
@@ -53,7 +54,7 @@ function DashboardSwitcher() {
     case 'WAITER':
       return <WaiterDashboard />
     case 'CHEF':
-      return <KitchenPage />
+      return <Navigate to="/kds" replace />
     default:
       return <Navigate to="/floor" replace />
   }
@@ -107,7 +108,11 @@ export default function App() {
                 <Route path="audit-logs" element={<AuditLogsPage />} />
                 <Route path="insights" element={<InsightsPage />} />
                 <Route path="kitchen" element={<KitchenPage />} />
+                <Route path="kitchen-display" element={<KitchenPage />} />
                 <Route path="kds" element={<KDSPage />} />
+                <Route path="ai-alerts" element={<AIAlertsPage />} />
+                <Route path="waiter" element={<WaiterDashboard />} />
+                <Route path="host" element={<HostDashboard />} />
                 <Route path="booking" element={<AIBookingPage />} />
                 <Route path="users" element={<UsersPage />} />
                 <Route element={<OwnerRoute />}>

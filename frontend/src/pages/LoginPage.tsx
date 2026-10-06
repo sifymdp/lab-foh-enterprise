@@ -85,9 +85,12 @@ export function LoginPage() {
           </div>
 
           <form onSubmit={handleSubmit} className="login-form">
-            <label className="field">
+            <label className="field" htmlFor="login-email">
               <span>Email</span>
               <input
+                id="login-email"
+                name="email"
+                aria-label="Email address"
                 type="email"
                 className="input"
                 value={email}
@@ -96,9 +99,12 @@ export function LoginPage() {
                 required
               />
             </label>
-            <label className="field">
+            <label className="field" htmlFor="login-password">
               <span>Password</span>
               <input
+                id="login-password"
+                name="password"
+                aria-label="Password"
                 type="password"
                 className="input"
                 value={password}

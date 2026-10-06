@@ -163,8 +163,11 @@ export function InsightsPage() {
                   Walk-in Wait
                 </p>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                  <span className="muted" style={{ fontSize: '0.75rem' }}>Party:</span>
+                  <label htmlFor="insights-party-size" className="muted" style={{ fontSize: '0.75rem' }}>Party:</label>
                   <select
+                    id="insights-party-size"
+                    name="insightsPartySize"
+                    aria-label="Filter walk-in party size"
                     value={partySize}
                     onChange={e => setPartySize(Number(e.target.value))}
                     style={{ fontSize: '0.8rem', padding: '0.1rem 0.3rem', borderRadius: '4px', border: '1px solid var(--border)', background: 'var(--surface-2)' }}

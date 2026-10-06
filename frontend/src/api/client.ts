@@ -120,7 +120,12 @@ export function normalizeKitchenOrder(order: Record<string, unknown>): KitchenOr
     table_number: String(order.table_number ?? order.tableNumber ?? ''),
     placed_at: String(order.placed_at ?? order.placedAt ?? ''),
     status: String(order.status ?? 'RECEIVED') as KitchenOrder['status'],
-    preparation_started_at: (order.preparation_started_at ?? order.preparationStartedAt ?? null) as string | null,
+    notes: (order.notes ?? null) as string | null,
+    approval_status: String(order.approval_status ?? order.approvalStatus ?? 'APPROVED'),
+    estimated_prep_time_minutes: Number(order.estimated_prep_time_minutes ?? order.estimatedPrepTimeMinutes ?? 15),
+    received_at: (order.received_at ?? order.receivedAt ?? order.placed_at ?? order.placedAt ?? null) as string | null,
+    preparing_at: (order.preparing_at ?? order.preparingAt ?? order.preparation_started_at ?? order.preparationStartedAt ?? null) as string | null,
+    preparation_started_at: (order.preparing_at ?? order.preparingAt ?? order.preparation_started_at ?? order.preparationStartedAt ?? null) as string | null,
     ready_at: (order.ready_at ?? order.readyAt ?? null) as string | null,
     served_at: (order.served_at ?? order.servedAt ?? null) as string | null,
     items: Array.isArray(order.items)
@@ -135,6 +140,7 @@ export function normalizeKitchenOrder(order: Record<string, unknown>): KitchenOr
           notes: (value.notes ?? null) as string | null,
           allergy_flag: Boolean(value.allergy_flag ?? value.allergyFlag ?? false),
           item_status: (value.item_status ?? value.itemStatus ?? 'RECEIVED') as string,
+          prep_time_minutes: Number(value.prep_time_minutes ?? value.prepTimeMinutes ?? 15),
         }
       })
       : [],
@@ -266,9 +272,14 @@ export const api = {
     return apiFetch('/sessions')
   },
 
-  getOrders(): Promise<any[]> {
+  getOrders(params?: { table_id?: string; session_id?: string; approval_status?: string }): Promise<any[]> {
     if (USE_MOCK) return Promise.resolve([])
-    return apiFetch('/orders')
+    const q = new URLSearchParams()
+    if (params?.table_id) q.set('table_id', params.table_id)
+    if (params?.session_id) q.set('session_id', params.session_id)
+    if (params?.approval_status) q.set('approval_status', params.approval_status)
+    const qs = q.toString() ? `?${q.toString()}` : ''
+    return apiFetch(`/orders${qs}`)
   },
 
   getUsers(): Promise<User[]> {
@@ -920,6 +931,23 @@ export const api = {
     return apiFetch('/vision/benchmark', {
       method: 'POST',
       body: JSON.stringify(payload),
+    })
+  },
+
+  getPendingOrders(): Promise<any[]> {
+    return this.getOrders({ approval_status: 'PENDING' })
+  },
+
+  approveOrder(orderId: string): Promise<any> {
+    if (USE_MOCK) return Promise.resolve({})
+    return apiFetch(`/orders/${orderId}/approve`, { method: 'POST' })
+  },
+
+  rejectOrder(orderId: string, reason?: string): Promise<any> {
+    if (USE_MOCK) return Promise.resolve({})
+    return apiFetch(`/orders/${orderId}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
     })
   },
 }

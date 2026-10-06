@@ -18,7 +18,7 @@ export function KDSBoard({ orders, selectedStation = 'ALL', onStatusChange }: KD
     )
   }, [orders, selectedStation])
 
-  const received = useMemo(() => filteredOrders.filter((o) => o.status === 'RECEIVED'), [filteredOrders])
+  const received = useMemo(() => filteredOrders.filter((o) => o.status === 'RECEIVED' || o.status === 'CONFIRMED'), [filteredOrders])
   const preparing = useMemo(() => filteredOrders.filter((o) => o.status === 'PREPARING'), [filteredOrders])
   const ready = useMemo(() => filteredOrders.filter((o) => o.status === 'READY'), [filteredOrders])
 

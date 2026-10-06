@@ -381,8 +381,11 @@ export function BillsPage() {
 
           <form onSubmit={handleCreateManualBill}>
             <div className="field">
-              <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>Dining Table Session</span>
+              <label htmlFor="bills-session-select" style={{ fontSize: '0.82rem', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Dining Table Session</label>
               <select
+                id="bills-session-select"
+                name="billingSessionId"
+                aria-label="Dining Table Session"
                 className="input"
                 value={sessionId}
                 onChange={(e) => setSessionId(e.target.value)}
@@ -399,8 +402,11 @@ export function BillsPage() {
             </div>
 
             <div className="field">
-              <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>Reference / Billing Notes</span>
+              <label htmlFor="bills-notes-input" style={{ fontSize: '0.82rem', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Reference / Billing Notes</label>
               <input
+                id="bills-notes-input"
+                name="billingNotes"
+                aria-label="Reference or Billing Notes"
                 className="input"
                 type="text"
                 placeholder="e.g. VIP guest, Split bill, Corporate..."
@@ -439,6 +445,9 @@ export function BillsPage() {
           <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
             <div style={{ flex: 1, minWidth: '200px' }}>
               <input
+                id="bills-history-search"
+                name="billsSearchQuery"
+                aria-label="Search by Bill Number or Table"
                 type="text"
                 className="input"
                 placeholder="🔍 Search by Bill # or Table..."

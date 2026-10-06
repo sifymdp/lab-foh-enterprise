@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSocket } from '../context/SocketContext'
 import { api, normalizeKitchenOrder } from '../api/client'
 import { KDSBoard } from '../components/kds/KDSBoard'
 import { CompletedOrdersPanel } from '../components/kds/CompletedOrdersPanel'
 import type { KitchenOrder } from '../types/kitchen'
+import { elapsedSeconds } from '../lib/formatters'
 import '../styles/kds.css'
 import { KDSSwitch } from '../components/kds/KDSSwitch'
 import { AIOperationsPanel } from '../components/kds/AIOperationsPanel'
@@ -14,6 +15,7 @@ export function KDSPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
 
   // Load orders from the backend
   const fetchOrders = useCallback(async () => {
@@ -68,10 +70,22 @@ export function KDSPage() {
     return () => clearInterval(interval)
   }, [fetchOrders])
 
+  const overdueOrders = useMemo(() => {
+    return orders.filter((o) => {
+      if (o.status === 'SERVED') return false
+      const estSec = (o.estimated_prep_time_minutes || 15) * 60
+      const el = elapsedSeconds(o.preparation_started_at || o.placed_at, o.ready_at || o.served_at)
+      return el > estSec
+    })
+  }, [orders])
+
   // When chef clicks the status button, update the order
   const handleStatusChange = async (orderId: string, newStatus: string) => {
     try {
+      setActionError(null)
       await api.updateOrderStatus(orderId, newStatus)
+      setSuccessMessage(`✓ Order #${orderId.slice(-6).toUpperCase()} transitioned to ${newStatus}`)
+      setTimeout(() => setSuccessMessage(null), 4000)
       // After successful update, refresh orders
       await fetchOrders()
     } catch (err) {
@@ -95,6 +109,28 @@ export function KDSPage() {
           <KDSSwitch currentView="kds" />
         </div>
       </header>
+
+      {/* Overdue Alert Banner for Chef */}
+      {overdueOrders.length > 0 && (
+        <div className="kds-overdue-alert-banner" role="alert">
+          <span className="kds-overdue-icon">🚨</span>
+          <div className="kds-overdue-content">
+            <strong>CHEF ATTENTION: {overdueOrders.length} Order{overdueOrders.length > 1 ? 's are' : ' is'} OVERDUE!</strong>
+            <span>
+              {overdueOrders.map(o => `Table ${o.table_number || o.table_id} (#${o.id.slice(-6).toUpperCase()})`).join(', ')} exceeded kitchen preparation time! Please expedite immediately.
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Success Notification */}
+      {successMessage && (
+        <div className="kds-action-success" role="status">
+          <span>{successMessage}</span>
+          <button type="button" onClick={() => setSuccessMessage(null)} aria-label="Dismiss">✕</button>
+        </div>
+      )}
+
       {actionError && (
         <div className="kds-action-error" role="alert">
           <span>{actionError}</span>

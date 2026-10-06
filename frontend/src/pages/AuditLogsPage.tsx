@@ -239,8 +239,11 @@ export function AuditLogsPage() {
           {/* Custom Date Inputs */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-              <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600 }}>From:</span>
+              <label htmlFor="audit-start-date" style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600 }}>From:</label>
               <input
+                id="audit-start-date"
+                name="auditStartDate"
+                aria-label="Audit Log Start Date"
                 type="datetime-local"
                 className="input"
                 style={{ fontSize: '0.78rem', padding: '0.3rem 0.5rem', width: '190px' }}
@@ -252,8 +255,11 @@ export function AuditLogsPage() {
               />
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-              <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600 }}>To:</span>
+              <label htmlFor="audit-end-date" style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600 }}>To:</label>
               <input
+                id="audit-end-date"
+                name="auditEndDate"
+                aria-label="Audit Log End Date"
                 type="datetime-local"
                 className="input"
                 style={{ fontSize: '0.78rem', padding: '0.3rem 0.5rem', width: '190px' }}
@@ -284,6 +290,9 @@ export function AuditLogsPage() {
         {/* Search & Dropdown Filters */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: '0.75rem' }}>
           <input
+            id="audit-search-input"
+            name="auditSearchQuery"
+            aria-label="Search actions, actors, emails, resource IDs, change diffs"
             className="input"
             type="text"
             placeholder="🔍 Search actions, actors, emails, resource IDs, change diffs…"
@@ -294,6 +303,9 @@ export function AuditLogsPage() {
 
           {/* Action Filter */}
           <select
+            id="audit-action-filter"
+            name="auditActionFilter"
+            aria-label="Filter by audit action"
             className="input"
             value={actionFilter}
             onChange={(e) => setActionFilter(e.target.value)}
@@ -307,6 +319,9 @@ export function AuditLogsPage() {
 
           {/* Resource Filter */}
           <select
+            id="audit-resource-filter"
+            name="auditResourceFilter"
+            aria-label="Filter by audit resource"
             className="input"
             value={resourceFilter}
             onChange={(e) => setResourceFilter(e.target.value)}

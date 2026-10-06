@@ -670,11 +670,14 @@ export function BillDetailPage() {
 
               {/* Custom Discount Input Form */}
               <div style={{ borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
-                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '0.4rem' }}>
+                <label htmlFor="bill-discount-percent" style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '0.4rem' }}>
                   Or Apply Custom Discount % (Staff Threshold: {cashierMaxDisc}%):
                 </label>
                 <form onSubmit={handleCustomDiscountSubmit} style={{ display: 'flex', gap: '0.5rem' }}>
                   <input
+                    id="bill-discount-percent"
+                    name="discountPercent"
+                    aria-label="Custom Discount Percent"
                     type="number"
                     step="0.5"
                     min="0"
@@ -686,6 +689,9 @@ export function BillDetailPage() {
                     style={{ width: '95px', fontSize: '0.85rem' }}
                   />
                   <input
+                    id="bill-discount-reason"
+                    name="discountReason"
+                    aria-label="Discount Reason or Voucher Note"
                     type="text"
                     placeholder="Reason / voucher note (e.g. VIP guest, Manager approval)..."
                     className="input"
@@ -829,10 +835,13 @@ export function BillDetailPage() {
 
               {/* Transaction Reference (Optional for Card/UPI/Cash) */}
               <div style={{ marginBottom: '1.25rem' }}>
-                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.35rem', color: 'var(--text-muted)' }}>
+                <label htmlFor="bill-transaction-ref" style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.35rem', color: 'var(--text-muted)' }}>
                   Transaction / Slip Reference (Optional):
                 </label>
                 <input
+                  id="bill-transaction-ref"
+                  name="transactionRef"
+                  aria-label="Transaction or Slip Reference"
                   type="text"
                   className="input"
                   placeholder={`e.g. ${paymentMethod === 'CASH' ? 'Drawer #1' : 'UTR/RRN 12345678'}`}
@@ -857,6 +866,9 @@ export function BillDetailPage() {
               <div style={{ marginTop: '1.25rem', borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                   <input
+                    id="bill-cancel-reason"
+                    name="cancelReason"
+                    aria-label="Bill Cancellation Reason"
                     className="input"
                     type="text"
                     placeholder="Cancellation reason..."

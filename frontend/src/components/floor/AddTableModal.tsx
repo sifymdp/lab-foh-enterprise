@@ -41,9 +41,12 @@ export function AddTableModal({ floor, onClose, onAdd }: AddTableModalProps) {
       <div className="modal">
         <h3>Add table</h3>
         <form onSubmit={handleSubmit}>
-          <label className="field">
+          <label className="field" htmlFor="add-table-number">
             <span>Table number</span>
             <input
+              id="add-table-number"
+              name="tableNumber"
+              aria-label="Table number"
               className="input"
               value={number}
               onChange={(e) => setNumber(e.target.value)}
@@ -51,9 +54,12 @@ export function AddTableModal({ floor, onClose, onAdd }: AddTableModalProps) {
               placeholder="e.g. 12"
             />
           </label>
-          <label className="field">
+          <label className="field" htmlFor="add-table-capacity">
             <span>Capacity</span>
             <input
+              id="add-table-capacity"
+              name="tableCapacity"
+              aria-label="Table capacity"
               type="number"
               className="input"
               min={1}
@@ -63,9 +69,12 @@ export function AddTableModal({ floor, onClose, onAdd }: AddTableModalProps) {
               required
             />
           </label>
-          <label className="field">
+          <label className="field" htmlFor="add-table-section">
             <span>Section</span>
             <select
+              id="add-table-section"
+              name="tableSection"
+              aria-label="Table section"
               className="input"
               value={sectionId}
               onChange={(e) => setSectionId(e.target.value)}
@@ -77,18 +86,28 @@ export function AddTableModal({ floor, onClose, onAdd }: AddTableModalProps) {
               ))}
             </select>
           </label>
-          <label className="field">
+          <label className="field" htmlFor="add-table-type">
             <span>Type</span>
-            <select className="input" value={type} onChange={(e) => setType(e.target.value as TableType)}>
+            <select
+              id="add-table-type"
+              name="tableType"
+              aria-label="Table type"
+              className="input"
+              value={type}
+              onChange={(e) => setType(e.target.value as TableType)}
+            >
               <option value="STANDARD">Standard</option>
               <option value="BOOTH">Booth</option>
               <option value="BAR">Bar</option>
               <option value="VIP">VIP</option>
             </select>
           </label>
-          <label className="field">
+          <label className="field" htmlFor="add-table-shape">
             <span>Shape</span>
             <select
+              id="add-table-shape"
+              name="tableShape"
+              aria-label="Table shape"
               className="input"
               value={shape}
               onChange={(e) => setShape(e.target.value as TableShape)}

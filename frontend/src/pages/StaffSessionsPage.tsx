@@ -204,11 +204,14 @@ export function StaffSessionsPage() {
         }}>
           {/* 1. Name / Keyword Search */}
           <div>
-            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.35rem', color: 'var(--text-muted)' }}>
+            <label htmlFor="staff-sessions-search" style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.35rem', color: 'var(--text-muted)' }}>
               🔍 Search Staff Name or Device
             </label>
             <div style={{ position: 'relative' }}>
               <input
+                id="staff-sessions-search"
+                name="staffSearchQuery"
+                aria-label="Search Staff Name or Device"
                 type="text"
                 className="input-field"
                 placeholder="e.g. Alex, Chrome, Waiter..."
@@ -278,6 +281,9 @@ export function StaffSessionsPage() {
               </div>
             </div>
             <input
+              id="staff-sessions-date"
+              name="staffSessionDate"
+              aria-label="Staff Session Date"
               type="date"
               className="input-field"
               value={selectedDate}
@@ -288,10 +294,13 @@ export function StaffSessionsPage() {
 
           {/* 3. Time Period Filter */}
           <div>
-            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.35rem', color: 'var(--text-muted)' }}>
+            <label htmlFor="staff-sessions-time-period" style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.35rem', color: 'var(--text-muted)' }}>
               ⏰ Login Time of Day
             </label>
             <select
+              id="staff-sessions-time-period"
+              name="staffSessionTimePeriod"
+              aria-label="Staff Session Time Period"
               className="input-field"
               value={selectedTimePeriod}
               onChange={(e) => setSelectedTimePeriod(e.target.value)}
@@ -307,10 +316,13 @@ export function StaffSessionsPage() {
 
           {/* 4. Role Filter */}
           <div>
-            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.35rem', color: 'var(--text-muted)' }}>
+            <label htmlFor="staff-sessions-role" style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.35rem', color: 'var(--text-muted)' }}>
               🎭 Staff Role
             </label>
             <select
+              id="staff-sessions-role"
+              name="staffSessionRole"
+              aria-label="Staff Session Role"
               className="input-field"
               value={selectedRole}
               onChange={(e) => setSelectedRole(e.target.value)}
@@ -328,10 +340,13 @@ export function StaffSessionsPage() {
 
           {/* 5. Status Filter */}
           <div>
-            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.35rem', color: 'var(--text-muted)' }}>
+            <label htmlFor="staff-sessions-status" style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.35rem', color: 'var(--text-muted)' }}>
               ⚡ Session Status
             </label>
             <select
+              id="staff-sessions-status"
+              name="staffSessionStatus"
+              aria-label="Session Status"
               className="input-field"
               value={selectedStatus}
               onChange={(e) => setSelectedStatus(e.target.value)}

@@ -175,3 +175,19 @@ def require_permission(permission: str):
 
     return _check
 
+
+def require_any_permission(*permissions: str):
+    """Dependency factory checking that user has at least one of the listed permissions."""
+    def _check(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> User:
+        if normalize_role(user.role) == "OWNER":
+            return user
+        for p in permissions:
+            if has_user_permission(db, user, p):
+                return user
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Missing required permission. Needs one of: {', '.join(permissions)}",
+        )
+    return _check
+
+

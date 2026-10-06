@@ -204,8 +204,16 @@ export function ReservationsPage() {
             <h3 style={{ margin: '0 0 20px', fontSize: 18 }}>New reservation</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div>
-                <label style={{ fontSize: 13, fontWeight: 500, display: 'block', marginBottom: 4 }}>Table *</label>
-                <select className="input" value={form.tableId} onChange={(e) => setForm((f) => ({ ...f, tableId: e.target.value }))} style={{ width: '100%' }}>
+                <label htmlFor="res-form-table" style={{ fontSize: 13, fontWeight: 500, display: 'block', marginBottom: 4 }}>Table *</label>
+                <select
+                  id="res-form-table"
+                  name="reservationTable"
+                  aria-label="Reservation Table"
+                  className="input"
+                  value={form.tableId}
+                  onChange={(e) => setForm((f) => ({ ...f, tableId: e.target.value }))}
+                  style={{ width: '100%' }}
+                >
                   <option value="">Select a table</option>
                   {availableTables.map((t) => (
                     <option key={t.id} value={t.id}>Table {t.number} (capacity {t.capacity})</option>
@@ -214,27 +222,74 @@ export function ReservationsPage() {
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div>
-                  <label style={{ fontSize: 13, fontWeight: 500, display: 'block', marginBottom: 4 }}>Guest name *</label>
-                  <input className="input" value={form.guestName} onChange={(e) => setForm((f) => ({ ...f, guestName: e.target.value }))} placeholder="Smith" style={{ width: '100%' }} />
+                  <label htmlFor="res-form-guest-name" style={{ fontSize: 13, fontWeight: 500, display: 'block', marginBottom: 4 }}>Guest name *</label>
+                  <input
+                    id="res-form-guest-name"
+                    name="guestName"
+                    aria-label="Guest name"
+                    className="input"
+                    value={form.guestName}
+                    onChange={(e) => setForm((f) => ({ ...f, guestName: e.target.value }))}
+                    placeholder="Smith"
+                    style={{ width: '100%' }}
+                  />
                 </div>
                 <div>
-                  <label style={{ fontSize: 13, fontWeight: 500, display: 'block', marginBottom: 4 }}>Party size</label>
-                  <input className="input" type="number" min="1" max="20" value={form.partySize} onChange={(e) => setForm((f) => ({ ...f, partySize: e.target.value }))} style={{ width: '100%' }} />
+                  <label htmlFor="res-form-party-size" style={{ fontSize: 13, fontWeight: 500, display: 'block', marginBottom: 4 }}>Party size</label>
+                  <input
+                    id="res-form-party-size"
+                    name="partySize"
+                    aria-label="Party size"
+                    className="input"
+                    type="number"
+                    min="1"
+                    max="20"
+                    value={form.partySize}
+                    onChange={(e) => setForm((f) => ({ ...f, partySize: e.target.value }))}
+                    style={{ width: '100%' }}
+                  />
                 </div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div>
-                  <label style={{ fontSize: 13, fontWeight: 500, display: 'block', marginBottom: 4 }}>Arrival time *</label>
-                  <input className="input" type="datetime-local" value={form.reservedFor} onChange={(e) => setForm((f) => ({ ...f, reservedFor: e.target.value }))} style={{ width: '100%' }} />
+                  <label htmlFor="res-form-reserved-for" style={{ fontSize: 13, fontWeight: 500, display: 'block', marginBottom: 4 }}>Arrival time *</label>
+                  <input
+                    id="res-form-reserved-for"
+                    name="reservedFor"
+                    aria-label="Arrival time"
+                    className="input"
+                    type="datetime-local"
+                    value={form.reservedFor}
+                    onChange={(e) => setForm((f) => ({ ...f, reservedFor: e.target.value }))}
+                    style={{ width: '100%' }}
+                  />
                 </div>
                 <div>
-                  <label style={{ fontSize: 13, fontWeight: 500, display: 'block', marginBottom: 4 }}>Auto-release at *</label>
-                  <input className="input" type="datetime-local" value={form.reservedUntil} onChange={(e) => setForm((f) => ({ ...f, reservedUntil: e.target.value }))} style={{ width: '100%' }} />
+                  <label htmlFor="res-form-reserved-until" style={{ fontSize: 13, fontWeight: 500, display: 'block', marginBottom: 4 }}>Auto-release at *</label>
+                  <input
+                    id="res-form-reserved-until"
+                    name="reservedUntil"
+                    aria-label="Auto-release time"
+                    className="input"
+                    type="datetime-local"
+                    value={form.reservedUntil}
+                    onChange={(e) => setForm((f) => ({ ...f, reservedUntil: e.target.value }))}
+                    style={{ width: '100%' }}
+                  />
                 </div>
               </div>
               <div>
-                <label style={{ fontSize: 13, fontWeight: 500, display: 'block', marginBottom: 4 }}>Notes</label>
-                <input className="input" value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} placeholder="Window seat preferred…" style={{ width: '100%' }} />
+                <label htmlFor="res-form-notes" style={{ fontSize: 13, fontWeight: 500, display: 'block', marginBottom: 4 }}>Notes</label>
+                <input
+                  id="res-form-notes"
+                  name="reservationNotes"
+                  aria-label="Reservation notes"
+                  className="input"
+                  value={form.notes}
+                  onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+                  placeholder="Window seat preferred…"
+                  style={{ width: '100%' }}
+                />
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8, marginTop: 20, justifyContent: 'flex-end' }}>

@@ -159,7 +159,7 @@ def clear_floor_tables(
     db.query(VisionMismatch).filter(VisionMismatch.table_id.in_(table_ids)).delete(synchronize_session=False)
     db.query(TableROI).filter(TableROI.table_id.in_(table_ids)).delete(synchronize_session=False)
     db.query(StatusHistory).filter(StatusHistory.table_id.in_(table_ids)).delete(synchronize_session=False)
-    db.query(FloorPlanSuggestion).filter(FloorPlanSuggestion.existing_table_id.in_(table_ids)).delete(synchronize_session=False)
+    db.query(FloorPlanSuggestion).filter(FloorPlanSuggestion.floor_id == floor_id).delete(synchronize_session=False)
     db.query(TableQRCode).filter(TableQRCode.table_id.in_(table_ids)).delete(synchronize_session=False)
 
     # 2. Audit log
@@ -238,25 +238,25 @@ def optimize_floor_plan_layout(
             cap = 4
         elif shape == "RECTANGLE":
             if aspect >= 1.0:
-                if aspect > 1.55 or raw_w > 130:
-                    norm_w, norm_h = 140.0, 85.0
+                if aspect > 1.35 or raw_w > 120:
+                    norm_w, norm_h = 140.0, 75.0
                     cap = 6
                 else:
-                    norm_w, norm_h = 110.0, 80.0
+                    norm_w, norm_h = 110.0, 75.0
                     cap = 4
             else:
-                if (1.0 / aspect) > 1.55 or raw_h > 130:
-                    norm_w, norm_h = 85.0, 140.0
+                if (1.0 / aspect) > 1.35 or raw_h > 120:
+                    norm_w, norm_h = 75.0, 140.0
                     cap = 6
                 else:
-                    norm_w, norm_h = 80.0, 110.0
+                    norm_w, norm_h = 75.0, 110.0
                     cap = 4
         else:  # SQUARE or UNKNOWN
             if raw_w < 55 and raw_h < 55:
                 norm_w, norm_h = 70.0, 70.0
                 cap = 2
             else:
-                norm_w, norm_h = 85.0, 85.0
+                norm_w, norm_h = 80.0, 80.0
                 cap = 4
 
         cx = float(it.get("cx", floor_w / 2.0))
@@ -273,10 +273,10 @@ def optimize_floor_plan_layout(
         })
 
     # Floor boundary padding to keep tables inside dining room boundaries
-    margin_left = 65.0
-    margin_right = 65.0
-    margin_top = 65.0
-    margin_bottom = 65.0
+    margin_left = 60.0
+    margin_right = 60.0
+    margin_top = 55.0
+    margin_bottom = 55.0
 
     # Iterative relaxation passes to separate overlapping tables and ensure walking aisles
     for _ in range(30):
@@ -312,12 +312,48 @@ def optimize_floor_plan_layout(
             b["cx"] = max(margin_left + hw, min(floor_w - margin_right - hw, b["cx"]))
             b["cy"] = max(margin_top + hh, min(floor_h - margin_bottom - hh, b["cy"]))
 
-    results = []
+    # Architectural Grid & Dining Row Alignment Pass:
+    # Cluster tables whose center Y coordinates are within 55px into clean horizontal rows
+    boxes.sort(key=lambda b: b["cy"])
+    rows: list[list[dict[str, Any]]] = []
     for b in boxes:
+        placed = False
+        for r in rows:
+            avg_row_y = sum(x["cy"] for x in r) / len(r)
+            if abs(b["cy"] - avg_row_y) <= 55.0:
+                r.append(b)
+                placed = True
+                break
+        if not placed:
+            rows.append([b])
+
+    # Align each row along its average baseline Y and sort tables from left to right with aisle gaps
+    aligned_boxes: list[dict[str, Any]] = []
+    for r in rows:
+        row_y = round(sum(b["cy"] for b in r) / len(r), 1)
+        r.sort(key=lambda b: b["cx"])
+        for i in range(len(r)):
+            r[i]["cy"] = row_y
+            if i > 0:
+                prev_right = r[i - 1]["cx"] + r[i - 1]["w"] / 2.0
+                curr_left = r[i]["cx"] - r[i]["w"] / 2.0
+                if curr_left < prev_right + aisle_clearance:
+                    shift = (prev_right + aisle_clearance) - curr_left
+                    r[i]["cx"] += shift
+
+        for b in r:
+            hw, hh = b["w"] / 2.0, b["h"] / 2.0
+            b["cx"] = max(margin_left + hw, min(floor_w - margin_right - hw, b["cx"]))
+            b["cy"] = max(margin_top + hh, min(floor_h - margin_bottom - hh, b["cy"]))
+            aligned_boxes.append(b)
+
+    results = []
+    for idx, b in enumerate(aligned_boxes):
         fx = round(b["cx"] - b["w"] / 2.0, 1)
         fy = round(b["cy"] - b["h"] / 2.0, 1)
         results.append({
             "orig_index": b["orig_index"],
+            "suggested_number": f"T{idx + 1}",
             "x": fx,
             "y": fy,
             "width": b["w"],
@@ -510,7 +546,7 @@ def analyze_floor_layout(
         H_matrix = compute_default_perspective_homography(float(frame_w), float(frame_h), floor_w, floor_h)
 
     # Stage 5, 6, 7, 8, 9: Custom YOLO11 Model + Detection Filtering + Tracking + Geometry + Temporal Confirmation
-    eff_min_conf = max(0.08, min(float(min_confidence or 0.10), 0.14))
+    eff_min_conf = max(0.20, float(min_confidence or 0.30))
     candidates = table_detector.detect_from_source(source, min_confidence=eff_min_conf, sample_frames=6)
     if not candidates and frame is not None:
         candidates = detect_candidate_tables(frame, min_confidence=eff_min_conf)
@@ -673,7 +709,7 @@ def analyze_floor_layout(
             # Candidate is a New Table Proposal (Directly from video)
             stype = "NEW_TABLE"
             summary["new_tables"] += 1
-            label_num = f"T{idx + 1}" if reconstruct_mode else f"T{len(existing_tables) + idx + 1}"
+            label_num = item.get("suggested_number") or (f"T{idx + 1}" if reconstruct_mode else f"T{len(existing_tables) + idx + 1}")
 
             new_det_pos_str = json.dumps({
                 "x": round(floor_x, 1),

@@ -28,16 +28,18 @@ class ConnectionManager:
         if not room:
             self._rooms.pop(floor_id, None)
 
-    async def broadcast(self, floor_id: str, event: str, data: dict[str, Any]) -> None:
+    async def broadcast(self, floor_id: str | None, event: str, data: dict[str, Any]) -> None:
         message = json.dumps({"event": event, "data": data})
-        dead: list[WebSocket] = []
-        for ws in self._rooms.get(floor_id, []):
-            try:
-                await ws.send_text(message)
-            except Exception:
-                dead.append(ws)
-        for ws in dead:
-            self.disconnect(ws, floor_id)
+        target_floors = [floor_id] if (floor_id and floor_id != "*") else list(self._rooms.keys())
+        for f_id in target_floors:
+            dead: list[WebSocket] = []
+            for ws in self._rooms.get(f_id, []):
+                try:
+                    await ws.send_text(message)
+                except Exception:
+                    dead.append(ws)
+            for ws in dead:
+                self.disconnect(ws, f_id)
 
 
 manager = ConnectionManager()

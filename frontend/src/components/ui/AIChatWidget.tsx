@@ -284,6 +284,9 @@ export function AIChatWidget() {
 
                 <div style={{ display: 'flex', gap: 6 }}>
                   <input
+                    id="ai-widget-api-key"
+                    name="aiApiKey"
+                    aria-label="AI Provider API Key"
                     type="password"
                     value={apiKeyInput}
                     onChange={(e) => setApiKeyInput(e.target.value)}
@@ -492,6 +495,9 @@ export function AIChatWidget() {
           >
             <input
               ref={inputRef}
+              id="ai-widget-chat-input"
+              name="aiWidgetMessage"
+              aria-label="Ask AI Assistant"
               type="text"
               className="input"
               style={{

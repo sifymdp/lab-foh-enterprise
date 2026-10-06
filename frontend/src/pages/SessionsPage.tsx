@@ -72,6 +72,9 @@ export function SessionsPage() {
 
       <div className="sessions-toolbar">
         <input
+          id="sessions-search-input"
+          name="sessionsSearch"
+          aria-label="Search table number or guest name"
           type="search"
           className="input sessions-search"
           placeholder="Search table # or guest name…"

@@ -48,6 +48,24 @@ from app.seed import seed_database
 from app.workers import camera_worker
 
 
+import asyncio
+
+async def _kitchen_alerts_background_task():
+    while True:
+        try:
+            await asyncio.sleep(10)
+            db = SessionLocal()
+            try:
+                from app.services import kitchen_alert_service
+                kitchen_alert_service.evaluate_kitchen_alerts(db)
+            finally:
+                db.close()
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            pass
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     Base.metadata.create_all(bind=engine)
@@ -60,8 +78,14 @@ async def lifespan(_app: FastAPI):
     models_loaded = load_models()
     if models_loaded:
         camera_worker.start_worker()
+    alert_task = asyncio.create_task(_kitchen_alerts_background_task())
     yield
     # ── Graceful shutdown ──
+    alert_task.cancel()
+    try:
+        await alert_task
+    except (asyncio.CancelledError, Exception):
+        pass
     # Stop stream workers first to prevent CancelledError cascades
     # from active StreamingResponse connections during shutdown.
     try:
@@ -96,6 +120,25 @@ cors_origins = settings.cors_origin_list + [
     "http://127.0.0.1:3000",
 ]
 
+from starlette.types import ASGIApp, Scope, Receive, Send
+
+
+class CancellationMiddleware:
+    """Catches asyncio.CancelledError during client disconnects or server reload/shutdown
+
+    to prevent unhandled ASGI exceptions from polluting Uvicorn logs.
+    """
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        try:
+            await self.app(scope, receive, send)
+        except (asyncio.CancelledError, GeneratorExit):
+            pass
+
+
+app.add_middleware(CancellationMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,

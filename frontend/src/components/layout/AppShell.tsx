@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { NavLink, Outlet } from 'react-router-dom'
+import { NavLink, Outlet, useLocation, Navigate } from 'react-router-dom'
 import { ToastStack } from '../ui/ToastStack'
 import { useAuth } from '../../context/AuthContext'
 import { useSocket } from '../../context/SocketContext'
@@ -63,6 +63,9 @@ function SidebarToggleIcon({ collapsed }: { collapsed?: boolean }) {
 export function AppShell() {
   const { user, logout } = useAuth()
   const { connected, on } = useSocket()
+  const location = useLocation()
+  const role = (user?.role || '').toUpperCase()
+
   const [toasts, setToasts] = useState<ToastItem[]>([])
 
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
@@ -141,6 +144,16 @@ export function AppShell() {
     if (!user) return []
     const role = (user.role || '').toUpperCase()
     const perms = new Set((user as any).permissions ?? [])
+
+    if (role === 'CHEF') {
+      return [
+        { to: '/kds', label: 'Kitchen KDS', icon: '🍳' },
+        { to: '/kitchen', label: 'Kitchen Display', icon: '👨‍🍳' },
+        { to: '/ai-alerts', label: 'AI Alerts', icon: '🔔' },
+        { to: '/floor', label: 'Floor Plan', icon: '◫' },
+        { to: '/menu', label: 'Menu System', icon: '🍽' },
+      ]
+    }
 
     const hasP = (p: string) => role === 'OWNER' || perms.has(p)
 
@@ -235,6 +248,15 @@ export function AppShell() {
   }
 
   const navItems = getNavItems()
+
+  // Chef route protection: redirect unauthorized URLs to /kds
+  if (role === 'CHEF') {
+    const allowed = ['/kds', '/kitchen', '/kitchen-display', '/ai-alerts', '/floor', '/menu']
+    const isAllowed = allowed.some((path) => location.pathname === path || location.pathname.startsWith(path + '/'))
+    if (!isAllowed) {
+      return <Navigate to="/kds" replace />
+    }
+  }
 
   return (
     <div className={`app-shell ${isSidebarCollapsed ? 'app-shell--collapsed' : ''}`}>

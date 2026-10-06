@@ -136,12 +136,13 @@ export function LiveStreamPlayer({
 
         img.onerror = () => {
           isFetching = false
+          URL.revokeObjectURL(objectUrl)
           if (active && mountedRef.current) {
             setTimeout(pumpNextFrame, 400)
           }
         }
 
-        img.src = URL.createObjectURL(blob)
+        img.src = objectUrl
       } catch (err: any) {
         isFetching = false
         if (err.name !== 'AbortError' && active && mountedRef.current) {
@@ -373,16 +374,28 @@ export function LiveStreamPlayer({
 
           {modeLabel && (
             <span
+              title={modeLabel}
               style={{
                 fontSize: '0.72rem',
-                color: '#94a3b8',
-                background: 'rgba(30, 41, 59, 0.75)',
+                color: '#cbd5e1',
+                background: 'rgba(30, 41, 59, 0.85)',
                 padding: '3px 8px',
                 borderRadius: '6px',
-                border: '1px solid rgba(51, 65, 85, 0.6)',
+                border: '1px solid rgba(71, 85, 105, 0.7)',
+                fontWeight: 600,
+                letterSpacing: '0.02em',
+                whiteSpace: 'nowrap',
               }}
             >
-              {modeLabel}
+              {(() => {
+                if (modeLabel.includes('YouTube') || modeLabel.includes('Demo') || modeLabel.includes('External')) return '🔴 Live Stream'
+                if (modeLabel.includes('RTSP') || modeLabel.includes('CCTV')) return '📹 RTSP CCTV'
+                if (modeLabel.includes('ONVIF')) return '🌐 ONVIF'
+                if (modeLabel.includes('Webcam')) return '📷 Webcam'
+                if (modeLabel.includes('Video') || modeLabel.includes('MP4') || modeLabel.includes('Uploaded')) return '🎬 Video File'
+                if (modeLabel.includes('Synthetic')) return '🧪 Test Pattern'
+                return modeLabel.length > 22 ? modeLabel.slice(0, 20) + '…' : modeLabel
+              })()}
             </span>
           )}
         </div>

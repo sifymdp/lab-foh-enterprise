@@ -10,8 +10,38 @@ from app.services.ollama_service import generate_text, try_generate
 from app.socket_manager import emit_sync
 
 ROLE_FILTER: dict[str, list[str]] = {
-    "WAITER": ["WAIT_ALERT", "DIRTY_ALERT", "WAITER_CALL", "CASH_PAYMENT_REQUEST"],
-    "HOST": ["WAIT_ALERT", "SEATING_SUGGESTION", "WAITER_CALL"],
+    "WAITER": [
+        "WAIT_ALERT",
+        "DIRTY_ALERT",
+        "WAITER_CALL",
+        "CASH_PAYMENT_REQUEST",
+        "FOOD_READY",
+        "FOOD_WAITING",
+    ],
+    "CHEF": [
+        "KITCHEN_ORDER_WAITING",
+        "KITCHEN_PREPARATION_DELAY",
+        "ORDER_DELAYED",
+        "HIGH_WORKLOAD",
+        "STATION_OVERLOAD",
+    ],
+    "SUPERVISOR": [
+        "WAIT_ALERT",
+        "DIRTY_ALERT",
+        "DEPARTURE_ALERT",
+        "SEATING_SUGGESTION",
+        "SHIFT_REPORT",
+        "WAITER_CALL",
+        "CASH_PAYMENT_REQUEST",
+        "KITCHEN_ORDER_WAITING",
+        "KITCHEN_PREPARATION_DELAY",
+        "FOOD_READY",
+        "FOOD_WAITING",
+        "ORDER_DELAYED",
+        "HIGH_WORKLOAD",
+        "STATION_OVERLOAD",
+    ],
+    "HOST": ["WAIT_ALERT", "SEATING_SUGGESTION", "WAITER_CALL", "FOOD_READY", "FOOD_WAITING"],
     "MANAGER": [
         "WAIT_ALERT",
         "DIRTY_ALERT",
@@ -20,6 +50,13 @@ ROLE_FILTER: dict[str, list[str]] = {
         "SHIFT_REPORT",
         "WAITER_CALL",
         "CASH_PAYMENT_REQUEST",
+        "KITCHEN_ORDER_WAITING",
+        "KITCHEN_PREPARATION_DELAY",
+        "FOOD_READY",
+        "FOOD_WAITING",
+        "ORDER_DELAYED",
+        "HIGH_WORKLOAD",
+        "STATION_OVERLOAD",
     ],
     "OWNER": [
         "WAIT_ALERT",
@@ -29,6 +66,13 @@ ROLE_FILTER: dict[str, list[str]] = {
         "SHIFT_REPORT",
         "WAITER_CALL",
         "CASH_PAYMENT_REQUEST",
+        "KITCHEN_ORDER_WAITING",
+        "KITCHEN_PREPARATION_DELAY",
+        "FOOD_READY",
+        "FOOD_WAITING",
+        "ORDER_DELAYED",
+        "HIGH_WORKLOAD",
+        "STATION_OVERLOAD",
     ],
 }
 
@@ -53,18 +97,7 @@ def _alert_payload(event: AIEvent) -> dict:
 
 def _emit_ai_alert(db: Session, event: AIEvent) -> None:
     payload = _alert_payload(event)
-    if event.table_id:
-        from app.models import Table
-
-        table = db.get(Table, event.table_id)
-        if table:
-            emit_sync("ai_alert", payload, room=str(table.floor_id))
-            return
-    from app.models import Floor
-
-    floors = db.query(Floor).all()
-    for f in floors:
-        emit_sync("ai_alert", payload, room=str(f.id))
+    emit_sync("ai_alert", payload, room="*")
 
 
 def _to_out(event: AIEvent) -> AIEventOut:

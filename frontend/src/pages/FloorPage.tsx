@@ -22,7 +22,7 @@ import type { Floor, FloorLabelKind, RectBounds, Table, TableStatus } from '../t
 
 export function FloorPage() {
   const { user } = useAuth()
-  const { joinFloor, on } = useSocket()
+  const { on } = useSocket()
   const {
     floor,
     sessions,
@@ -48,6 +48,10 @@ export function FloorPage() {
   const editable = user ? canEditFloor(user.role) : false
   const isHost = user?.role === 'HOST'
   const isWaiter = user?.role === 'WAITER'
+
+  const userPerms = useMemo(() => new Set((user as any)?.permissions ?? []), [user])
+  const canViewReservations = user?.role === 'OWNER' || user?.role === 'CHEF' || userPerms.has('booking.view') || userPerms.has('reservations.manage')
+  const canViewCamera = user?.role === 'OWNER' || user?.role === 'CHEF' || userPerms.has('camera.view')
 
   const [statusFilter, setStatusFilter] = useState<TableStatus | null>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -88,9 +92,11 @@ export function FloorPage() {
   }, [])
 
   useEffect(() => {
-    import('../api/client').then(({ api }) => {
-      api.getVisionMismatches('PENDING').then((list) => setMismatches(list)).catch(() => {})
-    })
+    if (canViewCamera) {
+      import('../api/client').then(({ api }) => {
+        api.getVisionMismatches('PENDING').then((list) => setMismatches(list)).catch(() => {})
+      })
+    }
 
     import('../api/extensions').then(({ aiApi, reservationsApi, ordersApi }) => {
       aiApi.getAlerts(false).then((alerts) => {
@@ -112,20 +118,22 @@ export function FloorPage() {
         setCashCalls((prev) => ({ ...prev, ...cash }))
       }).catch(() => {})
 
-      reservationsApi.list().then((resList) => {
-        const resMap: Record<string, any> = {}
-        resList.forEach((r) => {
-          if (r.status !== 'CANCELLED' && r.tableId) {
-            resMap[r.tableId] = {
-              id: r.id,
-              guestName: r.guestName,
-              partySize: r.partySize,
-              reservedFor: r.reservedFor,
+      if (canViewReservations) {
+        reservationsApi.list().then((resList) => {
+          const resMap: Record<string, any> = {}
+          resList.forEach((r) => {
+            if (r.status !== 'CANCELLED' && r.tableId) {
+              resMap[r.tableId] = {
+                id: r.id,
+                guestName: r.guestName,
+                partySize: r.partySize,
+                reservedFor: r.reservedFor,
+              }
             }
-          }
-        })
-        setReservationsMap(resMap)
-      }).catch(() => {})
+          })
+          setReservationsMap(resMap)
+        }).catch(() => {})
+      }
 
       ordersApi.list({ approvalStatus: 'PENDING' }).then((orders) => {
         const pMap: Record<string, number> = {}
@@ -137,7 +145,7 @@ export function FloorPage() {
         setPendingOrdersMap(pMap)
       }).catch(() => {})
     })
-  }, [])
+  }, [canViewCamera, canViewReservations])
 
   useEffect(() => {
     const unsubMismatch = on('cctv_mismatch_detected', (payload: any) => {
@@ -234,6 +242,7 @@ export function FloorPage() {
       }
     })
     const reloadReservations = () => {
+      if (!canViewReservations) return
       import('../api/extensions').then(({ reservationsApi }) => {
         reservationsApi.list().then((resList) => {
           const resMap: Record<string, any> = {}
@@ -351,10 +360,6 @@ export function FloorPage() {
     () => (floor ? computeFloorStats(floor, sessions) : null),
     [floor, sessions],
   )
-
-  useEffect(() => {
-    if (floor?.id) joinFloor(floor.id)
-  }, [floor?.id, joinFloor])
 
   const handleSectionChange = useCallback(
     (sectionId: string, bounds: RectBounds) => {

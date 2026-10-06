@@ -11,6 +11,7 @@ interface OrderDetailModalProps {
 
 const STATUS_CONFIG: Record<string, { label: string; dot: string; actionLabel: string; nextStatus: string; actionColor: string }> = {
   RECEIVED:  { label: 'Received',  dot: '#f59e0b', actionLabel: 'Start Preparing', nextStatus: 'PREPARING', actionColor: '#d97706' },
+  CONFIRMED: { label: 'Confirmed', dot: '#f59e0b', actionLabel: 'Start Preparing', nextStatus: 'PREPARING', actionColor: '#d97706' },
   PREPARING: { label: 'Preparing', dot: '#3b82f6', actionLabel: 'Mark Ready',      nextStatus: 'READY',     actionColor: '#2563eb' },
   READY:     { label: 'Ready',     dot: '#16a34a', actionLabel: 'Mark Served',     nextStatus: 'SERVED',    actionColor: '#16a34a' },
   SERVED:    { label: 'Served',    dot: '#94a3b8', actionLabel: '',                nextStatus: '',          actionColor: '#64748b' },
@@ -118,6 +119,17 @@ export function OrderDetailModal({ order, onClose, onStatusChange, busy }: Order
             </div>
           )}
         </div>
+
+        {/* Special Instructions for Chef */}
+        {order.notes && (
+          <div className="odm-table-instructions">
+            <span className="odm-table-notes-icon">📝</span>
+            <div className="odm-table-notes-content">
+              <strong>Special Instructions for Chef / Kitchen:</strong>
+              <p>{order.notes}</p>
+            </div>
+          </div>
+        )}
 
         {/* Items List */}
         <div className="odm-items">

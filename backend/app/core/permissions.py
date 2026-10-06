@@ -183,7 +183,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         PERM_ORDERS_VIEW, PERM_ORDERS_CONFIRM, PERM_ORDERS_SERVE,
         PERM_ORDERS_APPROVE, PERM_ORDERS_REJECT,
         # Kitchen
-        PERM_KITCHEN_VIEW, PERM_KITCHEN_MANAGE,
+        PERM_KITCHEN_VIEW, PERM_KITCHEN_UPDATE, PERM_KITCHEN_MANAGE,
         PERM_KDS_VIEW, PERM_KDS_BUMP, PERM_KDS_RECALL, PERM_KDS_PRIORITY,
         # Billing
         PERM_BILLING_VIEW, PERM_BILLING_CREATE, PERM_BILLING_UPDATE, PERM_BILLING_CANCEL,
@@ -254,6 +254,8 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
     },
     "WAITER": {
         PERM_TABLE_VIEW,
+        PERM_BOOKING_VIEW,
+        PERM_CAMERA_VIEW,
         PERM_ORDERS_VIEW, PERM_ORDERS_CREATE, PERM_ORDERS_UPDATE, PERM_ORDERS_SERVE,
         PERM_ORDERS_APPROVE, PERM_ORDERS_REJECT,
         PERM_BILLING_VIEW,
@@ -269,9 +271,16 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         # KDS
         PERM_KDS_VIEW, PERM_KDS_BUMP, PERM_KDS_RECALL, PERM_KDS_PRIORITY,
         PERM_ORDERS_VIEW, PERM_ORDERS_CONFIRM,
-        PERM_TABLE_VIEW,
-        # Menu (view for reference)
-        PERM_MENU_VIEW,
+        # Tables & Floor plan
+        PERM_TABLE_VIEW, PERM_TABLE_MANAGE, PERM_FLOOR_EDIT,
+        # Bookings & Reservations (floor view)
+        PERM_BOOKING_VIEW,
+        # Camera / Vision (floor view)
+        PERM_CAMERA_VIEW,
+        # Billing (session & bill status on floor)
+        PERM_BILLING_VIEW,
+        # Menu (view and management)
+        PERM_MENU_VIEW, PERM_MENU_MANAGE,
         # AI features (cooking time prediction, demand forecast)
         PERM_AI_FEATURES,
     },

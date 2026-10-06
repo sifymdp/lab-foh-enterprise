@@ -43,6 +43,24 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     listenersRef.current.get(event)?.forEach((h) => h(payload))
   }, [])
 
+function safeCloseSocket(ws: WebSocket | null) {
+  if (!ws) return
+  ws.onclose = null
+  ws.onerror = null
+  ws.onmessage = null
+  if (ws.readyState === WebSocket.CONNECTING) {
+    ws.onopen = () => {
+      try {
+        ws.close()
+      } catch {}
+    }
+  } else if (ws.readyState === WebSocket.OPEN) {
+    try {
+      ws.close()
+    } catch {}
+  }
+}
+
   const connect = useCallback((floorId: string) => {
     if (USE_MOCK) {
       setConnected(true)
@@ -50,11 +68,20 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       return
     }
 
+    const currentWs = wsRef.current
+    if (currentWs && (currentWs.readyState === WebSocket.OPEN || currentWs.readyState === WebSocket.CONNECTING)) {
+      if (floorIdRef.current === floorId) {
+        return
+      }
+      safeCloseSocket(currentWs)
+    }
+
     if (retryTimerRef.current) {
       clearTimeout(retryTimerRef.current)
       retryTimerRef.current = null
     }
 
+    floorIdRef.current = floorId
     const token = localStorage.getItem('foh_access_token')
     const url = `${SOCKET_URL}/ws/${floorId}${token ? `?token=${token}` : ''}`
     
@@ -63,6 +90,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       wsRef.current = ws
 
       ws.onopen = () => {
+        if (wsRef.current !== ws) return
         console.log('[WS] Connected to', url)
         setConnected(true)
         setStatus('connected')
@@ -70,6 +98,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       }
 
       ws.onclose = () => {
+        if (wsRef.current !== ws) return
         setConnected(false)
         setStatus('reconnecting')
         // Exponential backoff with jitter
@@ -81,11 +110,13 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       }
 
       ws.onerror = () => {
+        if (wsRef.current !== ws) return
         setConnected(false)
         setStatus('reconnecting')
       }
 
       ws.onmessage = (e) => {
+        if (wsRef.current !== ws) return
         try {
           const { event, data } = JSON.parse(e.data)
           emit(event, data)
@@ -117,13 +148,23 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     connect(floorIdRef.current)
     return () => {
       if (retryTimerRef.current) clearTimeout(retryTimerRef.current)
-      wsRef.current?.close()
+      const wsToClean = wsRef.current
+      setTimeout(() => {
+        if (wsRef.current === wsToClean) {
+          // Socket is still in active use by remounted component
+          return
+        }
+        safeCloseSocket(wsToClean)
+      }, 200)
     }
   }, [connect])
 
   const joinFloor = useCallback((floorId: string) => {
-    floorIdRef.current = floorId
-    wsRef.current?.close()
+    if (!floorId || floorId === floorIdRef.current) {
+      if (wsRef.current?.readyState === WebSocket.OPEN || wsRef.current?.readyState === WebSocket.CONNECTING) {
+        return
+      }
+    }
     connect(floorId)
   }, [connect])
 
@@ -138,8 +179,18 @@ export function SocketProvider({ children }: { children: ReactNode }) {
   return <SocketContext.Provider value={value}>{children}</SocketContext.Provider>
 }
 
+const fallbackSocketContext: SocketContextValue = {
+  connected: false,
+  status: 'disconnected',
+  joinFloor: () => {},
+  on: () => () => {},
+}
+
 export function useSocket() {
   const ctx = useContext(SocketContext)
-  if (!ctx) throw new Error('useSocket must be used within SocketProvider')
+  if (!ctx) {
+    return fallbackSocketContext
+  }
   return ctx
 }
+

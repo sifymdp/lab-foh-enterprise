@@ -88,11 +88,14 @@ export function SeatGuestModal({
         </div>
 
         <form onSubmit={handleSubmit} style={{ marginTop: '16px' }}>
-          <label className="field" style={{ marginBottom: '14px' }}>
+          <label className="field" htmlFor="seat-guest-name" style={{ marginBottom: '14px' }}>
             <span style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--text)' }}>
               Guest Name / Reservation Party <span style={{ color: '#ef4444' }}>*</span>
             </span>
             <input
+              id="seat-guest-name"
+              name="guestName"
+              aria-label="Guest Name / Reservation Party"
               type="text"
               className="input"
               value={guestName}
@@ -107,7 +110,7 @@ export function SeatGuestModal({
             />
           </label>
 
-          <label className="field" style={{ marginBottom: '10px' }}>
+          <label className="field" htmlFor="seat-party-size" style={{ marginBottom: '10px' }}>
             <span style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--text)' }}>
               Number of People (Party Size) <span style={{ color: '#ef4444' }}>*</span>
             </span>
@@ -150,6 +153,9 @@ export function SeatGuestModal({
                 −
               </button>
               <input
+                id="seat-party-size"
+                name="partySize"
+                aria-label="Party Size"
                 type="number"
                 className="input"
                 min={1}

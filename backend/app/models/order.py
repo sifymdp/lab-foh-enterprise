@@ -34,6 +34,10 @@ class Order(Base):
     )
 
     placed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    preparing_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ready_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    served_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # RECEIVED | CONFIRMED | PREPARING | READY | SERVED
     status: Mapped[str] = mapped_column(String(20), default="RECEIVED")
 

@@ -2,8 +2,10 @@ export interface KitchenOrder {
   id: string
   table_id: string
   table_number?: string
-  status: 'RECEIVED' | 'PREPARING' | 'READY' | 'SERVED'
+  status: 'RECEIVED' | 'CONFIRMED' | 'PREPARING' | 'READY' | 'SERVED'
   placed_at: string
+  received_at?: string | null
+  preparing_at?: string | null
   preparation_started_at?: string | null
   ready_at?: string | null
   served_at?: string | null
@@ -17,6 +19,9 @@ export interface KitchenOrder {
     name: string
   }
   source?: string
+  notes?: string | null
+  approval_status?: string
+  estimated_prep_time_minutes?: number
 }
 
 export interface KitchenOrderItem {
@@ -29,6 +34,7 @@ export interface KitchenOrderItem {
   notes?: string | null
   allergy_flag?: boolean
   item_status?: string
+  prep_time_minutes?: number
 }
 
 export type KitchenStation =

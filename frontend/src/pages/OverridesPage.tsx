@@ -219,31 +219,31 @@ export function OverridesPage() {
           <div className="modal" style={{ width: '450px' }}>
             <h3>Grant Temporary Permission</h3>
             <form onSubmit={handleCreateTempPerm}>
-              <label className="field">
+              <label className="field" htmlFor="temp-user-id">
                 <span>Select Staff User</span>
-                <select className="input" value={tempUserId} onChange={(e) => setTempUserId(e.target.value)} required>
+                <select id="temp-user-id" name="tempUserId" aria-label="Select Staff User" className="input" value={tempUserId} onChange={(e) => setTempUserId(e.target.value)} required>
                   <option value="">-- Choose Staff User --</option>
                   {users.map(u => (
                     <option key={u.id} value={u.id}>{u.name} ({u.role})</option>
                   ))}
                 </select>
               </label>
-              <label className="field">
+              <label className="field" htmlFor="temp-permission">
                 <span>Target Permission Code</span>
-                <select className="input" value={tempPermission} onChange={(e) => setTempPermission(e.target.value)} required>
+                <select id="temp-permission" name="tempPermission" aria-label="Target Permission Code" className="input" value={tempPermission} onChange={(e) => setTempPermission(e.target.value)} required>
                   <option value="">-- Choose Permission --</option>
                   {staticPermissions.map((p: string) => (
                     <option key={p} value={p}>{p}</option>
                   ))}
                 </select>
               </label>
-              <label className="field">
+              <label className="field" htmlFor="temp-start-time">
                 <span>Start Clearance Time</span>
-                <input type="datetime-local" className="input" value={tempStartTime} onChange={(e) => setTempStartTime(e.target.value)} required />
+                <input id="temp-start-time" name="tempStartTime" aria-label="Start Clearance Time" type="datetime-local" className="input" value={tempStartTime} onChange={(e) => setTempStartTime(e.target.value)} required />
               </label>
-              <label className="field">
+              <label className="field" htmlFor="temp-end-time">
                 <span>Expiry Expiration Time</span>
-                <input type="datetime-local" className="input" value={tempEndTime} onChange={(e) => setTempEndTime(e.target.value)} required />
+                <input id="temp-end-time" name="tempEndTime" aria-label="Expiry Expiration Time" type="datetime-local" className="input" value={tempEndTime} onChange={(e) => setTempEndTime(e.target.value)} required />
               </label>
               <div className="modal-actions" style={{ marginTop: '1.5rem' }}>
                 <button type="button" className="btn btn-ghost" onClick={() => setShowTempForm(false)}>Cancel</button>
@@ -259,34 +259,34 @@ export function OverridesPage() {
           <div className="modal" style={{ width: '450px' }}>
             <h3>Direct User Permission Override</h3>
             <form onSubmit={handleDirectPermission}>
-              <label className="field">
+              <label className="field" htmlFor="direct-user-id">
                 <span>Select Staff User</span>
-                <select className="input" value={directUserId} onChange={(e) => setDirectUserId(e.target.value)} required>
+                <select id="direct-user-id" name="directUserId" aria-label="Select Staff User" className="input" value={directUserId} onChange={(e) => setDirectUserId(e.target.value)} required>
                   <option value="">-- Choose Staff User --</option>
                   {users.filter(x => x.role !== 'OWNER').map(u => (
                     <option key={u.id} value={u.id}>{u.name} ({u.role})</option>
                   ))}
                 </select>
               </label>
-              <label className="field">
+              <label className="field" htmlFor="direct-permission">
                 <span>Select Permission Code</span>
-                <select className="input" value={directPermission} onChange={(e) => setDirectPermission(e.target.value)} required>
+                <select id="direct-permission" name="directPermission" aria-label="Select Permission Code" className="input" value={directPermission} onChange={(e) => setDirectPermission(e.target.value)} required>
                   <option value="">-- Choose Permission --</option>
                   {staticPermissions.map((p: string) => (
                     <option key={p} value={p}>{p}</option>
                   ))}
                 </select>
               </label>
-              <label className="field">
+              <label className="field" htmlFor="direct-action">
                 <span>Action Instruction</span>
-                <select className="input" value={directAction} onChange={(e) => setDirectAction(e.target.value)}>
+                <select id="direct-action" name="directAction" aria-label="Action Instruction" className="input" value={directAction} onChange={(e) => setDirectAction(e.target.value)}>
                   <option value="GRANT">GRANT (Explicit Allow Override)</option>
                   <option value="REVOKE">REVOKE (Explicit Block Override)</option>
                 </select>
               </label>
-              <label className="field">
+              <label className="field" htmlFor="direct-reason">
                 <span>Reason for Override</span>
-                <input className="input" placeholder="e.g. Regular manager backup cover" value={directReason} onChange={(e) => setDirectReason(e.target.value)} required />
+                <input id="direct-reason" name="directReason" aria-label="Reason for Override" className="input" placeholder="e.g. Regular manager backup cover" value={directReason} onChange={(e) => setDirectReason(e.target.value)} required />
               </label>
               <div className="modal-actions" style={{ marginTop: '1.5rem' }}>
                 <button type="button" className="btn btn-ghost" onClick={() => setShowDirectForm(false)}>Cancel</button>

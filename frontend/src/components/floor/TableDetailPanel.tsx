@@ -4,6 +4,7 @@ import { api } from '../../api/client'
 import { ordersApi, type Order } from '../../api/extensions'
 import { useAuth } from '../../context/AuthContext'
 import { useFloor } from '../../context/FloorContext'
+import { useSocket } from '../../context/SocketContext'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { canEditFloor, canSeatGuests } from '../../lib/permissions'
 import { STATUS_CONFIG } from '../../services/tableConfig'
@@ -66,6 +67,7 @@ export function TableDetailPanel({
   const navigate = useNavigate()
   const { user } = useAuth()
   const { sessions, changeStatus, closeSession, updateTable, deleteTable, refresh } = useFloor()
+  const { on } = useSocket()
   const [statusLoading, setStatusLoading] = useState(false)
   const [statusError, setStatusError] = useState<string | null>(null)
   const [layoutError, setLayoutError] = useState<string | null>(null)
@@ -91,25 +93,47 @@ export function TableDetailPanel({
   const section = floor.sections.find((s) => s.id === table.sectionId)
   const editable = user ? canEditFloor(user.role) : false
   const canSeat = user ? canSeatGuests(user.role) : false
-  const showOrders = ['ACTIVE', 'BILLING', 'PAID'].includes(table.status)
+  const userPerms = new Set((user as any)?.permissions ?? [])
+  const canViewBilling = user?.role === 'OWNER' || user?.role === 'CHEF' || userPerms.has('billing.view')
+  const showOrders = ['SEATED', 'ACTIVE', 'BILLING', 'PAID', 'OCCUPIED'].includes(table.status)
+
+  const loadTableOrders = () => {
+    setOrdersLoading(true)
+    const query = session?.id ? { sessionId: session.id } : { tableId: table.id }
+    ordersApi.list(query)
+      .then((data) => setOrders(data))
+      .catch(() => setOrders([]))
+      .finally(() => setOrdersLoading(false))
+  }
 
   useEffect(() => {
-    let cancelled = false
-    if (!session?.id) {
-      setOrders([])
-      setOrdersLoading(false)
-      return
-    }
-    setOrdersLoading(true)
-    ordersApi.list({ sessionId: session.id })
-      .then((data) => { if (!cancelled) setOrders(data) })
-      .catch(() => { if (!cancelled) setOrders([]) })
-      .finally(() => { if (!cancelled) setOrdersLoading(false) })
-    return () => { cancelled = true }
+    loadTableOrders()
   }, [table.id, session?.id])
+
+  useEffect(() => {
+    const unsub1 = on('order.pending_approval', (evt: any) => {
+      if (!evt?.tableId || evt.tableId === table.id) loadTableOrders()
+    })
+    const unsub2 = on('order.approved', (evt: any) => {
+      if (!evt?.tableId || evt.tableId === table.id) loadTableOrders()
+    })
+    const unsub3 = on('order.rejected', (evt: any) => {
+      if (!evt?.tableId || evt.tableId === table.id) loadTableOrders()
+    })
+    const unsub4 = on('order_placed', (evt: any) => {
+      if (!evt?.tableId || evt.tableId === table.id) loadTableOrders()
+    })
+    return () => {
+      unsub1()
+      unsub2()
+      unsub3()
+      unsub4()
+    }
+  }, [table.id, session?.id, on])
 
   // Fetch or sync real live bill for this table session
   useEffect(() => {
+    if (!canViewBilling) return
     let cancelled = false
     api.getReadySessions()
       .then((readyList: any[]) => {
@@ -129,7 +153,7 @@ export function TableDetailPanel({
       })
       .catch(() => {})
     return () => { cancelled = true }
-  }, [session?.id, table.id, table.number, table.status])
+  }, [session?.id, table.id, table.number, table.status, canViewBilling])
 
   const pendingOrders = orders.filter((o) => o.approvalStatus === 'PENDING')
   const approvedOrders = orders.filter((o) => o.approvalStatus !== 'REJECTED')
@@ -275,6 +299,9 @@ export function TableDetailPanel({
         })
       }
       await changeStatus(table.id, 'PAID')
+      if (session?.id) {
+        await closeSession(session.id).catch(() => {})
+      }
       setConfirmPaid(false)
       setShowBill(false)
       await refresh()
@@ -525,6 +552,9 @@ export function TableDetailPanel({
                       await onResolveCashCall()
                     }
                     await changeStatus(table.id, 'PAID')
+                    if (session?.id) {
+                      await closeSession(session.id).catch(() => {})
+                    }
                     await refresh()
                   } catch (err: any) {
                     setStatusError(err.message || 'Failed to process cash payment')
@@ -629,21 +659,36 @@ export function TableDetailPanel({
 
       <dl className="detail-list">
         <div>
-          <dt>Capacity</dt>
+          <dt><label htmlFor={`table-capacity-${table.id}`}>Capacity</label></dt>
           <dd>
             {editable ? (
-              <input type="number" min={1} max={20} className="input input-sm" value={table.capacity}
-                onChange={(e) => updateTable(table.id, { capacity: Number(e.target.value) })} />
+              <input
+                id={`table-capacity-${table.id}`}
+                name="tableCapacity"
+                aria-label="Table capacity"
+                type="number"
+                min={1}
+                max={20}
+                className="input input-sm"
+                value={table.capacity}
+                onChange={(e) => updateTable(table.id, { capacity: Number(e.target.value) })}
+              />
             ) : `${table.capacity} guests`}
           </dd>
         </div>
         {editable && (
           <>
             <div>
-              <dt>Type</dt>
+              <dt><label htmlFor={`table-type-${table.id}`}>Type</label></dt>
               <dd>
-                <select className="input" value={table.type}
-                  onChange={(e) => updateTable(table.id, { type: e.target.value as TableType })}>
+                <select
+                  id={`table-type-${table.id}`}
+                  name="tableType"
+                  aria-label="Table type"
+                  className="input"
+                  value={table.type}
+                  onChange={(e) => updateTable(table.id, { type: e.target.value as TableType })}
+                >
                   <option value="STANDARD">Standard</option>
                   <option value="BOOTH">Booth</option>
                   <option value="BAR">Bar</option>

@@ -53,6 +53,11 @@ class StreamWorkerState:
     running: bool = False
     stop_event: threading.Event = field(default_factory=threading.Event)
     thread: threading.Thread | None = None
+    ai_thread: threading.Thread | None = None
+    ai_event: threading.Event = field(default_factory=threading.Event)
+    pending_ai_frame: np.ndarray | None = None
+    pending_ai_raw_size: tuple[int, int] = (1920, 1080)
+    ai_lock: threading.Lock = field(default_factory=threading.Lock)
     config_signature: Any = None
     last_error: str | None = None
     latest_tracks: list[PersonTrack] = field(default_factory=list)
@@ -60,7 +65,8 @@ class StreamWorkerState:
     latest_candidate_tables: list[Any] = field(default_factory=list)
     processed_frames: int = 0
     inference_ms: float = 0.0
-    fps: float = 0.0
+    stream_fps: float = 25.0
+    ai_fps: float = 0.0
 
 
 _stream_workers: dict[str, StreamWorkerState] = {}
@@ -89,19 +95,20 @@ def _get_rois_for_floor(floor_id: str) -> list[dict[str, Any]]:
 
 
 def _draw_hud(frame: np.ndarray, state: StreamWorkerState) -> None:
-    h, w = frame.shape[:2]
-    # Dark translucent HUD pill in top-left
-    hud_w, hud_h = 320, 60
+    # Render HUD below top player overlay controls (which occupy Y 0..46)
+    hud_x, hud_y = 12, 52
+    hud_w, hud_h = 330, 48
     overlay = frame.copy()
-    cv2.rectangle(overlay, (10, 10), (10 + hud_w, 10 + hud_h), (15, 23, 42), -1)
-    cv2.addWeighted(overlay, 0.75, frame, 0.25, 0, frame)
-    cv2.rectangle(frame, (10, 10), (10 + hud_w, 10 + hud_h), (51, 65, 85), 1)
+    cv2.rectangle(overlay, (hud_x, hud_y), (hud_x + hud_w, hud_y + hud_h), (15, 23, 42), -1)
+    cv2.addWeighted(overlay, 0.78, frame, 0.22, 0, frame)
+    cv2.rectangle(frame, (hud_x, hud_y), (hud_x + hud_w, hud_y + hud_h), (51, 65, 85), 1)
 
     # Text telemetry
     model_str = f"AI: {vision_engine.model_name} (ByteTrack)"
-    perf_str = f"FPS: {state.fps:.1f} | Latency: {state.inference_ms:.1f}ms | People: {len(state.latest_tracks)}"
-    cv2.putText(frame, model_str, (20, 32), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (56, 189, 248), 1, cv2.LINE_AA)
-    cv2.putText(frame, perf_str, (20, 56), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (226, 232, 240), 1, cv2.LINE_AA)
+    fps_val = state.stream_fps if state.stream_fps > 0 else 25.0
+    perf_str = f"Stream: {fps_val:.1f} FPS | AI: {state.inference_ms:.0f}ms | People: {len(state.latest_tracks)}"
+    cv2.putText(frame, model_str, (hud_x + 10, hud_y + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (56, 189, 248), 1, cv2.LINE_AA)
+    cv2.putText(frame, perf_str, (hud_x + 10, hud_y + 38), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (226, 232, 240), 1, cv2.LINE_AA)
 
 
 def _make_standby_frame_bytes(camera_url: str, source_type: str, message: str = "Connecting to Camera Stream...") -> bytes:
@@ -136,7 +143,6 @@ def _draw_stream_overlays(
     scale_x = OUTPUT_FRAME_SIZE[0] / max(raw_w, 1)
     scale_y = OUTPUT_FRAME_SIZE[1] / max(raw_h, 1)
 
-    # 1. Draw Table ROIs or Candidate Table Detections
     # 1. Draw Table ROIs & Candidate Tables
     registered_bboxes: list[tuple[int, int, int, int]] = []
     if show_rois and rois:
@@ -183,11 +189,14 @@ def _draw_stream_overlays(
     # Draw Candidate New Tables discovered by YOLO11 (shown in Blue per legend)
     if show_rois and state.latest_candidate_tables:
         for idx, cand in enumerate(state.latest_candidate_tables):
-            bx, by, bw, bh = cand.bbox
+            cand_bbox = getattr(cand, "bbox", None) or (cand.get("x", 0), cand.get("y", 0), cand.get("width", 0), cand.get("height", 0)) if isinstance(cand, dict) else (0, 0, 0, 0)
+            bx, by, bw, bh = cand_bbox
+            cand_shape = getattr(cand, "shape", "TABLE") if not isinstance(cand, dict) else cand.get("shape", "TABLE")
+            cand_conf = getattr(cand, "confidence", 0.5) if not isinstance(cand, dict) else cand.get("confidence", 0.5)
+
             # Check if this candidate overlaps an existing registered table
             matched_reg = False
             for rx, ry, rw, rh in registered_bboxes:
-                # Centroid distance or IoU
                 if abs((bx + bw / 2) - (rx + rw / 2)) < max(bw, rw) * 0.55 and abs((by + bh / 2) - (ry + rh / 2)) < max(bh, rh) * 0.55:
                     matched_reg = True
                     break
@@ -202,7 +211,7 @@ def _draw_stream_overlays(
 
             # Vibrant Blue for Candidate New Table (BGR: 235, 160, 30)
             roi_color = (235, 160, 30)
-            label = f"Cand T{idx + 1} [{cand.shape}] {int(cand.confidence * 100)}%"
+            label = f"Cand T{idx + 1} [{cand_shape}] {int(cand_conf * 100)}%"
             cv2.rectangle(frame, (ox, oy), (ox + ow, oy + oh), roi_color, 2)
             (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.40, 1)
             cv2.rectangle(frame, (ox, max(oy - th - 6, 0)), (ox + tw + 8, oy), roi_color, -1)
@@ -253,13 +262,84 @@ def _draw_stream_overlays(
     _draw_hud(frame, state)
 
 
+def _ai_inference_worker(state: StreamWorkerState) -> None:
+    """
+    Decoupled background AI worker thread:
+    Runs YOLO11 person detection + ByteTrack + Candidate Table detection asynchronously
+    so video streaming capture remains buttery smooth at 25 FPS without CPU stalls.
+    """
+    last_candidate_check = 0.0
+    while not state.stop_event.is_set():
+        # Wait until video streamer supplies a new frame or timeout
+        triggered = state.ai_event.wait(timeout=0.1)
+        if state.stop_event.is_set():
+            break
+        if not triggered:
+            continue
+
+        with state.ai_lock:
+            frame_to_process = state.pending_ai_frame
+            raw_w, raw_h = state.pending_ai_raw_size
+            state.pending_ai_frame = None
+            state.ai_event.clear()
+
+        if frame_to_process is None or getattr(frame_to_process, "size", 0) == 0:
+            continue
+
+        try:
+            cached_rois = _get_rois_for_floor(state.floor_id)
+
+            # Periodically scan for candidate tables in the background (every 8s, max 15 solid tables)
+            now = time.time()
+            if now - last_candidate_check >= 8.0 or not state.latest_candidate_tables:
+                last_candidate_check = now
+                try:
+                    cands = table_detector.detect_candidate_tables(frame_to_process, min_confidence=0.40)
+                    if cands:
+                        cands = sorted(cands, key=lambda c: getattr(c, "confidence", 0), reverse=True)[:15]
+                    with state.lock:
+                        state.latest_candidate_tables = cands
+                except Exception as cand_err:
+                    logger.debug("Background candidate table scan error: %s", cand_err)
+
+            # Run YOLO11 person detection & ByteTrack tracking
+            res = vision_engine.process_frame(
+                frame_to_process,
+                table_rois=cached_rois,
+                apply_privacy_blur=False,
+            )
+
+            with state.lock:
+                state.latest_tracks = res.tracks
+                state.latest_table_matches = res.table_matches
+                state.inference_ms = res.inference_time_ms
+                state.ai_fps = res.fps
+
+            # Update temporal occupancy tracker for each table ROI
+            for roi in cached_rois:
+                tid = str(roi["table_id"])
+                match = res.table_matches.get(tid)
+                cnt = match.people_count if match else 0
+                c = match.confidence if match else 0.0
+                ids = [t.track_id for t in match.matched_tracks] if match else []
+                temporal_tracker.update(tid, cnt, c, ids)
+
+        except Exception as ai_err:
+            logger.warning("Background AI inference error for floor %s: %s", state.floor_id, ai_err)
+            time.sleep(0.05)
+
+
 def _stream_worker_loop(state: StreamWorkerState) -> None:
     source = None
     last_refresh = 0.0
     cached_rois: list[dict[str, Any]] = []
+    frame_interval = 1.0 / OUTPUT_FPS  # 0.040s for 25 FPS
+    fps_history: list[float] = []
+    last_tick_time = time.perf_counter()
 
     try:
         while not state.stop_event.is_set():
+            t_start = time.perf_counter()
             try:
                 now = time.time()
                 if source is None or now - last_refresh >= CONFIG_REFRESH_SECONDS:
@@ -274,7 +354,7 @@ def _stream_worker_loop(state: StreamWorkerState) -> None:
                     last_refresh = now
 
                 if source is None:
-                    time.sleep(0.1)
+                    time.sleep(0.04)
                     continue
 
                 try:
@@ -312,56 +392,47 @@ def _stream_worker_loop(state: StreamWorkerState) -> None:
                     if s_ok:
                         with state.lock:
                             state.frame = s_buf.tobytes()
-                    time.sleep(0.08)
+                    time.sleep(0.04)
                     continue
 
                 raw_h, raw_w = raw_frame.shape[:2]
                 state.processed_frames += 1
 
-                # Run candidate table detector periodically so live candidate boxes appear on the video feed
-                if state.processed_frames % 20 == 1 or not state.latest_candidate_tables:
-                    try:
-                        cands = table_detector.detect_candidate_tables(raw_frame, min_confidence=0.10)
-                        state.latest_candidate_tables = cands
-                    except Exception as e:
-                        logger.debug("Candidate table detection in stream error: %s", e)
+                # Calculate smooth Stream FPS telemetry
+                now_tick = time.perf_counter()
+                tick_delta = now_tick - last_tick_time
+                last_tick_time = now_tick
+                if tick_delta > 0:
+                    fps_history.append(1.0 / tick_delta)
+                    if len(fps_history) > 20:
+                        fps_history.pop(0)
+                    state.stream_fps = round(sum(fps_history) / len(fps_history), 1)
 
-                stride = max(settings.stream_inference_stride, 1)
-                if state.processed_frames % stride == 0 or state.processed_frames == 1:
-                    # Run YOLO11 + ByteTrack
-                    res = vision_engine.process_frame(
-                        raw_frame,
-                        table_rois=cached_rois,
-                        apply_privacy_blur=settings.cv_face_blur,
-                    )
-                    state.latest_tracks = res.tracks
-                    state.latest_table_matches = res.table_matches
-                    state.inference_ms = res.inference_time_ms
-                    state.fps = res.fps
+                # Feed background AI worker if ready
+                if state.pending_ai_frame is None:
+                    with state.ai_lock:
+                        state.pending_ai_frame = raw_frame.copy()
+                        state.pending_ai_raw_size = (raw_w, raw_h)
+                    state.ai_event.set()
 
-                    # Update temporal states for tables
-                    for roi in cached_rois:
-                        tid = str(roi["table_id"])
-                        match = res.table_matches.get(tid)
-                        cnt = match.people_count if match else 0
-                        c = match.confidence if match else 0.0
-                        ids = [t.track_id for t in match.matched_tracks] if match else []
-                        temporal_tracker.update(tid, cnt, c, ids)
-
+                # Build fast output frame with cached AI detections
                 output_frame = cv2.resize(raw_frame, OUTPUT_FRAME_SIZE)
                 _draw_stream_overlays(output_frame, cached_rois, state, raw_w, raw_h)
 
-                ok, buf = cv2.imencode(".jpg", output_frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
-                if not ok:
-                    continue
+                ok, buf = cv2.imencode(".jpg", output_frame, [cv2.IMWRITE_JPEG_QUALITY, 78])
+                if ok:
+                    with state.lock:
+                        state.frame = buf.tobytes()
+                        state.last_error = None
 
-                with state.lock:
-                    state.frame = buf.tobytes()
-                    state.last_error = None
-                time.sleep(1.0 / OUTPUT_FPS)
+                # Sleep to maintain smooth 25 FPS
+                t_elapsed = time.perf_counter() - t_start
+                sleep_time = max(0.002, frame_interval - t_elapsed)
+                time.sleep(sleep_time)
+
             except Exception as loop_err:
                 logger.warning("Recoverable error in stream worker loop for floor %s: %s", state.floor_id, loop_err)
-                time.sleep(0.1)
+                time.sleep(0.04)
     finally:
         state.running = False
 
@@ -380,13 +451,27 @@ def _ensure_stream_worker(floor_id: str, camera_url: str, source_type: str = "RT
 
         if (state.camera_url != camera_url or state.source_type != source_type) and state.running:
             state.stop_event.set()
+            state.ai_event.set()
             if state.thread is not None:
-                state.thread.join(timeout=1.5)
+                state.thread.join(timeout=1.0)
+            if state.ai_thread is not None:
+                state.ai_thread.join(timeout=1.0)
             state.running = False
             state.thread = None
+            state.ai_thread = None
             state.frame = _make_standby_frame_bytes(camera_url, source_type, f"Switching Mode to {source_type}...")
             state.stop_event = threading.Event()
+            state.ai_event = threading.Event()
             state.config_signature = None
+            try:
+                from app.services.video_sources import video_source_manager
+                with video_source_manager._lock:
+                    sid = f"stream_{floor_id}"
+                    if sid in video_source_manager._sources:
+                        video_source_manager._sources[sid].disconnect()
+                        del video_source_manager._sources[sid]
+            except Exception:
+                pass
 
         state.camera_url = camera_url
         state.source_type = source_type
@@ -395,6 +480,7 @@ def _ensure_stream_worker(floor_id: str, camera_url: str, source_type: str = "RT
 
         if not state.running:
             state.stop_event.clear()
+            state.ai_event.clear()
             state.running = True
             state.thread = threading.Thread(
                 target=_stream_worker_loop,
@@ -402,7 +488,14 @@ def _ensure_stream_worker(floor_id: str, camera_url: str, source_type: str = "RT
                 name=f"yolo11-stream-{floor_id}",
                 daemon=True,
             )
+            state.ai_thread = threading.Thread(
+                target=_ai_inference_worker,
+                args=(state,),
+                name=f"yolo11-ai-{floor_id}",
+                daemon=True,
+            )
             state.thread.start()
+            state.ai_thread.start()
         return state
 
 
@@ -441,8 +534,11 @@ def stop_all_stream_workers() -> None:
     for state in states:
         try:
             state.stop_event.set()
+            state.ai_event.set()
             if state.thread is not None:
-                state.thread.join(timeout=1.0)
+                state.thread.join(timeout=0.8)
+            if state.ai_thread is not None:
+                state.ai_thread.join(timeout=0.8)
         except Exception:
             pass  # Suppress errors during forced shutdown
     logger.info("All stream workers stopped (%d workers cleaned up)", len(states))
@@ -541,55 +637,82 @@ async def stream_single_frame(
     camera_id: str | None = None,
     stream_url: str | None = None,
     source_type: str | None = None,
-    db: Session = Depends(get_db),
 ):
     """Returns the latest single JPEG frame from the floor camera stream."""
-    camera_url = (stream_url or "").strip()
-    effective_source_type = (source_type or "").upper()
+    try:
+        camera_url = (stream_url or "").strip()
+        effective_source_type = (source_type or "").upper()
 
-    if not camera_url and camera_id:
-        cam = db.query(Camera).filter(Camera.id == camera_id).first()
-        if cam and cam.stream_url:
-            camera_url = cam.stream_url
-            if not effective_source_type and getattr(cam, "source_type", None):
-                effective_source_type = cam.source_type
+        if not camera_url:
+            with SessionLocal() as db:
+                if camera_id:
+                    cam = db.query(Camera).filter(Camera.id == camera_id).first()
+                    if cam and cam.stream_url:
+                        camera_url = cam.stream_url
+                        if not effective_source_type and getattr(cam, "source_type", None):
+                            effective_source_type = cam.source_type
 
-    if not camera_url:
-        cam = db.query(Camera).filter(Camera.floor_id == floor_id).first()
-        if cam and cam.stream_url:
-            camera_url = cam.stream_url
-            if not effective_source_type and getattr(cam, "source_type", None):
-                effective_source_type = cam.source_type
+                if not camera_url:
+                    cam = db.query(Camera).filter(Camera.floor_id == floor_id).first()
+                    if cam and cam.stream_url:
+                        camera_url = cam.stream_url
+                        if not effective_source_type and getattr(cam, "source_type", None):
+                            effective_source_type = cam.source_type
 
-    if not camera_url:
-        sample_path = Path("camera_uploads/table_t-1.mp4")
-        if sample_path.exists():
-            camera_url = str(sample_path)
-            effective_source_type = "VIDEO_FILE"
-        else:
-            camera_url = "SYNTHETIC"
-            effective_source_type = "SYNTHETIC"
+                if not camera_url:
+                    tables = db.query(Table).filter(Table.floor_id == floor_id).all()
+                    for t in tables:
+                        if t.camera_url:
+                            camera_url = t.camera_url
+                            break
 
-    if not effective_source_type or effective_source_type == "UNDEFINED":
-        if camera_url.endswith((".mp4", ".avi", ".mov", ".mkv")):
-            effective_source_type = "VIDEO_FILE"
-        else:
-            effective_source_type = "RTSP"
+                if not camera_url:
+                    first_cam = db.query(Camera).first()
+                    if first_cam and first_cam.stream_url:
+                        camera_url = first_cam.stream_url
+                        if not effective_source_type and getattr(first_cam, "source_type", None):
+                            effective_source_type = first_cam.source_type
 
-    state = _ensure_stream_worker(floor_id, camera_url, effective_source_type)
-    with state.lock:
-        frame = state.frame
+                if not camera_url and settings.default_camera_url:
+                    camera_url = settings.default_camera_url
 
-    if frame is None:
-        frame = _make_standby_frame_bytes(camera_url, effective_source_type)
+        if not camera_url:
+            sample_path = Path("camera_uploads/table_t-1.mp4")
+            if sample_path.exists():
+                camera_url = str(sample_path)
+                effective_source_type = "VIDEO_FILE"
+            else:
+                camera_url = "SYNTHETIC"
+                effective_source_type = "SYNTHETIC"
 
-    return Response(
-        content=frame,
-        media_type="image/jpeg",
-        headers={
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            "Pragma": "no-cache",
-            "Access-Control-Allow-Origin": "*",
-        },
-    )
+        if not effective_source_type or effective_source_type == "UNDEFINED":
+            if is_youtube_url(camera_url):
+                effective_source_type = "DEMO_STREAM"
+            elif camera_url == "SYNTHETIC":
+                effective_source_type = "SYNTHETIC"
+            elif camera_url.isdigit() or camera_url in ("0", "1", "2"):
+                effective_source_type = "WEBCAM"
+            elif camera_url.endswith((".mp4", ".avi", ".mov", ".mkv")):
+                effective_source_type = "VIDEO_FILE"
+            else:
+                effective_source_type = "RTSP"
+
+        state = _ensure_stream_worker(floor_id, camera_url, effective_source_type)
+        with state.lock:
+            frame = state.frame
+
+        if frame is None:
+            frame = _make_standby_frame_bytes(camera_url, effective_source_type)
+
+        return Response(
+            content=frame,
+            media_type="image/jpeg",
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Access-Control-Allow-Origin": "*",
+            },
+        )
+    except (asyncio.CancelledError, GeneratorExit):
+        return Response(status_code=204)
 

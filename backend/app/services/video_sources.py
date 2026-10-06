@@ -452,6 +452,7 @@ class YouTubeSource(BaseVideoSource):
         self._start_time: float = 0.0
         self._fallback_demo: VideoFileSource | SyntheticRestaurantSource | None = None
         self._last_failed_attempt: float = 0.0
+        self._consecutive_fails: int = 0
 
     def _extract_stream(self) -> tuple[bool, str | None, str | None]:
         u = (self.stream_url or "").strip()
@@ -465,7 +466,7 @@ class YouTubeSource(BaseVideoSource):
                 "quiet": True,
                 "no_warnings": True,
                 "skip_download": True,
-                "socket_timeout": 4,
+                "socket_timeout": 6,
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(self.stream_url, download=False)
@@ -475,15 +476,41 @@ class YouTubeSource(BaseVideoSource):
                 self._is_live = bool(info.get("is_live"))
                 formats = info.get("formats", [])
                 stream_url = None
-                for f in reversed(formats):
-                    f_url = f.get("url")
-                    if not f_url:
-                        continue
-                    if f.get("ext") == "m3u8" or f.get("protocol") in ("m3u8", "m3u8_native") or (f.get("vcodec") and f.get("vcodec") != "none"):
-                        stream_url = f_url
-                        break
+
+                # 1. For live streams and manifests, prefer high-quality HLS (.m3u8) (720p / 1080p)
+                m3u8_formats = [
+                    f for f in formats
+                    if (f.get("ext") == "m3u8" or str(f.get("protocol", "")).startswith("m3u8")) and f.get("url")
+                ]
+                if m3u8_formats:
+                    # Rank formats: 720p (sweet spot for high AI accuracy & smooth decoding), then 1080p, then 480p
+                    def _rank_m3u8(fmt: dict[str, Any]) -> int:
+                        h = fmt.get("height") or 0
+                        if h == 720:
+                            return 1000
+                        if h == 1080:
+                            return 900
+                        if h == 480:
+                            return 800
+                        return h
+
+                    best_fmt = sorted(m3u8_formats, key=_rank_m3u8, reverse=True)[0]
+                    stream_url = best_fmt.get("url")
+                    logger.info("Selected YouTube stream resolution: %s (height=%s)", best_fmt.get("resolution"), best_fmt.get("height"))
+
+                # 2. If no HLS found, pick best playable video format
+                if not stream_url:
+                    for f in reversed(formats):
+                        f_url = f.get("url")
+                        if not f_url:
+                            continue
+                        if f.get("vcodec") and f.get("vcodec") != "none":
+                            stream_url = f_url
+                            break
+
                 if not stream_url:
                     stream_url = info.get("url")
+
                 if stream_url:
                     return True, stream_url, None
                 return False, None, "No playable video stream found for this YouTube URL."
@@ -516,10 +543,6 @@ class YouTubeSource(BaseVideoSource):
             self._status = "CONNECTING"
             now = time.monotonic()
 
-            # If recently failed (within 20s), maintain fallback without re-running slow extractor
-            if self._fallback_demo and (now - self._last_failed_attempt) < 20.0:
-                return True
-
             if not self._direct_stream_url or (now - self._stream_extracted_at) > 1800:
                 ok, s_url, err = self._extract_stream()
                 if not ok or not s_url:
@@ -536,7 +559,7 @@ class YouTubeSource(BaseVideoSource):
                     except Exception:
                         pass
                 self._cap = cv2.VideoCapture(self._direct_stream_url)
-                self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 2)
                 if not self._cap.isOpened():
                     # Attempt one re-extraction if stream URL expired
                     ok, s_url, err = self._extract_stream()
@@ -550,11 +573,15 @@ class YouTubeSource(BaseVideoSource):
 
                 self._frames_count = int(self._cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
                 self._start_time = time.monotonic()
+                self._consecutive_fails = 0
                 self.is_connected = True
                 self._status = "ONLINE"
                 self._error_message = None
                 if self._fallback_demo:
-                    self._fallback_demo.disconnect()
+                    try:
+                        self._fallback_demo.disconnect()
+                    except Exception:
+                        pass
                     self._fallback_demo = None
                 return True
             except Exception as e:
@@ -575,6 +602,7 @@ class YouTubeSource(BaseVideoSource):
                 except Exception:
                     pass
                 self._fallback_demo = None
+            self._consecutive_fails = 0
             self.is_connected = False
             self._status = "OFFLINE"
 
@@ -623,12 +651,31 @@ class YouTubeSource(BaseVideoSource):
                         ok, frame = self._cap.read()
 
                 if not ok or frame is None:
-                    # Reconnect or activate fallback
-                    self._init_fallback("Frame read timeout")
+                    self._consecutive_fails += 1
+                    # Give it up to 8 retries before giving up on stream
+                    if self._consecutive_fails < 8:
+                        return False, None
+
+                    # If multiple consecutive fails, try quick reconnect on direct URL
+                    try:
+                        self._cap.release()
+                    except Exception:
+                        pass
+                    self._cap = cv2.VideoCapture(self._direct_stream_url)
+                    if self._cap.isOpened():
+                        ok, frame = self._cap.read()
+                        if ok and frame is not None:
+                            self._consecutive_fails = 0
+                            self._record_frame(frame)
+                            return True, frame
+
+                    # Still failing: activate fallback
+                    self._init_fallback("Frame read timeout after retries")
                     if self._fallback_demo:
                         return self._fallback_demo.read_frame()
 
                 if ok and frame is not None:
+                    self._consecutive_fails = 0
                     self._record_frame(frame)
                     return True, frame
 

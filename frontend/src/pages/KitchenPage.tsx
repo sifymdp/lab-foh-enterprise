@@ -1,26 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, normalizeKitchenOrder } from '../api/client'
 import { useSocket } from '../context/SocketContext'
 import type { KitchenOrder, KitchenStation } from '../types'
 import { KDSSwitch } from '../components/kds/KDSSwitch'
 import { StationFilter, matchItemStation, getItemDisplayStation } from '../components/kds/StationFilter'
 import { OrderDetailModal } from '../components/kds/OrderDetailModal'
+import { elapsedSeconds, formatElapsed, formatTime } from '../lib/formatters'
 import '../styles/kds.css'
-
-function elapsedSeconds(from: string, to?: string | null): number {
-  const start = new Date(from).getTime()
-  const end = to ? new Date(to).getTime() : Date.now()
-  return Math.max(0, Math.floor((end - start) / 1000))
-}
-
-function formatElapsed(seconds: number): string {
-  const m = Math.floor(seconds / 60)
-  const s = seconds % 60
-  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-}
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; border: string; dot: string }> = {
   RECEIVED: { label: 'Received', color: '#b45309', bg: '#fef3c7', border: '#fde68a', dot: '#f59e0b' },
+  CONFIRMED: { label: 'Confirmed', color: '#b45309', bg: '#fef3c7', border: '#fde68a', dot: '#f59e0b' },
   PREPARING: { label: 'Preparing', color: '#1d4ed8', bg: '#dbeafe', border: '#bfdbfe', dot: '#3b82f6' },
   READY: { label: 'Ready', color: '#15803d', bg: '#dcfce7', border: '#bbf7d0', dot: '#22c55e' },
   SERVED: { label: 'Served', color: '#475569', bg: '#f1f5f9', border: '#e2e8f0', dot: '#94a3b8' },
@@ -34,37 +24,68 @@ const SOURCE_LABELS: Record<string, { label: string; color: string; bg: string }
 
 const NEXT_ACTION: Record<string, { label: string; nextStatus: string }> = {
   RECEIVED: { label: 'Start Preparing →', nextStatus: 'PREPARING' },
+  CONFIRMED: { label: 'Start Preparing →', nextStatus: 'PREPARING' },
   PREPARING: { label: 'Mark Ready ✓', nextStatus: 'READY' },
   READY: { label: 'Mark Served ★', nextStatus: 'SERVED' },
 }
 
 function ElapsedTimer({ order }: { order: KitchenOrder }) {
   const [elapsed, setElapsed] = useState(0)
+  const estMins = order.estimated_prep_time_minutes || 15
+  const estSeconds = estMins * 60
 
   useEffect(() => {
-    const startFrom = order.preparation_started_at ?? order.placed_at
-    const endAt = order.served_at ?? order.ready_at ?? null
+    const startFrom = order.preparation_started_at || order.placed_at
+    const endAt = order.served_at || order.ready_at || null
 
-    if (endAt) {
+    const update = () => {
       setElapsed(elapsedSeconds(startFrom, endAt))
-      return
     }
-
-    setElapsed(elapsedSeconds(startFrom))
-    const id = setInterval(() => setElapsed(elapsedSeconds(startFrom)), 1000)
+    update()
+    if (endAt) return
+    const id = setInterval(update, 1000)
     return () => clearInterval(id)
   }, [order.placed_at, order.preparation_started_at, order.ready_at, order.served_at])
 
-  const isLate = elapsed > 15 * 60
-  const isMed = elapsed > 8 * 60
+  const isLate = order.status !== 'SERVED' && elapsed > estSeconds
+  const overdueMins = Math.floor((elapsed - estSeconds) / 60)
 
   return (
-    <span
-      className={`kds-elapsed-badge ${isLate ? 'is-late' : isMed ? 'is-warning' : ''}`}
-      title={`Elapsed time since order round started`}
-    >
-      ⏱ {formatElapsed(elapsed)}
-    </span>
+    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+      <span
+        style={{
+          fontSize: '0.74rem',
+          color: '#64748b',
+          fontWeight: 600,
+          background: 'rgba(0,0,0,0.04)',
+          padding: '2px 6px',
+          borderRadius: '4px',
+        }}
+        title={`Placed at ${formatTime(order.placed_at)}`}
+      >
+        📥 {formatTime(order.placed_at) || 'Just now'}
+      </span>
+      <span
+        style={{
+          fontSize: '0.74rem',
+          color: '#0369a1',
+          fontWeight: 600,
+          background: '#e0f2fe',
+          padding: '2px 6px',
+          borderRadius: '4px',
+        }}
+        title={`Estimated food preparation duration`}
+      >
+        ⏳ Est: {estMins}m
+      </span>
+      <span
+        className={`kds-elapsed-badge ${isLate ? 'is-late' : elapsed > estSeconds * 0.75 ? 'is-warning' : ''}`}
+        title={`Elapsed preparation duration`}
+        style={isLate ? { animation: 'pulse 1.5s infinite', background: '#fee2e2', color: '#b91c1c', border: '1px solid #f87171', fontWeight: 800 } : {}}
+      >
+        ⏱ {formatElapsed(elapsed)} {isLate ? `(🚨 +${overdueMins}m late)` : ''}
+      </span>
+    </div>
   )
 }
 
@@ -90,17 +111,21 @@ function getStationTagClass(st?: string | null): string {
 }
 
 function OrderCard({ order, selectedStation, onCardClick, onQuickAction, busy }: OrderCardProps) {
+  const [confirmingNext, setConfirmingNext] = useState(false)
   const cfg = STATUS_CONFIG[order.status] ?? STATUS_CONFIG.RECEIVED
   const next = NEXT_ACTION[order.status]
   const srcKey = (order.source || 'WAITER').toUpperCase()
   const src = SOURCE_LABELS[srcKey] ?? SOURCE_LABELS.WAITER
+
+  const estMins = order.estimated_prep_time_minutes || 15
+  const isOverdue = order.status !== 'SERVED' && elapsedSeconds(order.preparation_started_at || order.placed_at, order.ready_at || order.served_at) > estMins * 60
 
   const items = order.items || []
   const totalItemCount = items.reduce((sum: number, i: any) => sum + (i.quantity || 1), 0)
 
   return (
     <div
-      className={`kds-order-card kds-order-card--${order.status.toLowerCase()}`}
+      className={`kds-order-card kds-order-card--${order.status.toLowerCase()} ${isOverdue ? 'is-overdue' : ''}`}
       onClick={() => onCardClick(order)}
       role="button"
       tabIndex={0}
@@ -126,6 +151,14 @@ function OrderCard({ order, selectedStation, onCardClick, onQuickAction, busy }:
       </div>
 
       <div className="kds-order-card__body">
+        {order.notes && (
+          <div className="kds-order-card__table-instructions">
+            <span className="kds-order-card__table-notes-icon">📝</span>
+            <div className="kds-order-card__table-notes-text">
+              <strong>Chef Instructions:</strong> {order.notes}
+            </div>
+          </div>
+        )}
         <div className="kds-order-card__item-list">
           {items.map((item: any, idx: number) => {
             const displayStation = getItemDisplayStation(item)
@@ -182,18 +215,47 @@ function OrderCard({ order, selectedStation, onCardClick, onQuickAction, busy }:
           {totalItemCount} item{totalItemCount !== 1 ? 's' : ''} total
         </span>
         {next && (
-          <button
-            type="button"
-            className="kds-order-card__action-btn"
-            style={{ background: cfg.color }}
-            disabled={busy}
-            onClick={(e) => {
-              e.stopPropagation()
-              onQuickAction(order.id, next.nextStatus)
-            }}
-          >
-            {busy ? 'Updating…' : next.label}
-          </button>
+          !confirmingNext ? (
+            <button
+              type="button"
+              className="kds-order-card__action-btn"
+              style={{ background: cfg.color }}
+              disabled={busy}
+              onClick={(e) => {
+                e.stopPropagation()
+                setConfirmingNext(true)
+              }}
+            >
+              {busy ? 'Updating…' : next.label}
+            </button>
+          ) : (
+            <div style={{ display: 'flex', gap: '4px' }}>
+              <button
+                type="button"
+                className="kds-order-card__action-btn"
+                style={{ background: '#16a34a', color: '#fff', fontWeight: 700 }}
+                disabled={busy}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onQuickAction(order.id, next.nextStatus)
+                  setConfirmingNext(false)
+                }}
+              >
+                {busy ? 'Updating…' : `Confirm: ${next.nextStatus}? ✓`}
+              </button>
+              <button
+                type="button"
+                className="kds-order-card__action-btn"
+                style={{ background: '#e2e8f0', color: '#475569', padding: '0 8px' }}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setConfirmingNext(false)
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          )
         )}
       </div>
     </div>
@@ -294,9 +356,18 @@ export function KitchenPage() {
           (order.items || []).some((item: any) => matchItemStation(item, station)),
         )
 
-  const receivingCount = orders.filter((o) => o.status === 'RECEIVED').length
+  const receivingCount = orders.filter((o) => o.status === 'RECEIVED' || o.status === 'CONFIRMED').length
   const preparingCount = orders.filter((o) => o.status === 'PREPARING').length
   const readyCount = orders.filter((o) => o.status === 'READY').length
+
+  const overdueOrders = useMemo(() => {
+    return orders.filter((o) => {
+      if (o.status === 'SERVED') return false
+      const estSec = (o.estimated_prep_time_minutes || 15) * 60
+      const el = elapsedSeconds(o.preparation_started_at || o.placed_at, o.ready_at || o.served_at)
+      return el > estSec
+    })
+  }, [orders])
 
   return (
     <div className="kds-page-wrap">
@@ -329,6 +400,19 @@ export function KitchenPage() {
           <KDSSwitch currentView="kitchen" />
         </div>
       </header>
+
+      {/* Overdue Chef Alert Banner */}
+      {overdueOrders.length > 0 && (
+        <div className="kds-overdue-alert-banner" role="alert">
+          <span className="kds-overdue-icon">🚨</span>
+          <div className="kds-overdue-content">
+            <strong>CHEF ATTENTION: {overdueOrders.length} Order{overdueOrders.length > 1 ? 's' : ''} OVERDUE!</strong>
+            <span>
+              {overdueOrders.map(o => `Table ${o.table_number || o.table_id} (#${o.id.slice(-6).toUpperCase()})`).join(', ')} exceeded preparation time. Expedite now!
+            </span>
+          </div>
+        </div>
+      )}
 
       {actionError && (
         <div className="kds-alert-banner kds-alert-banner--error" role="alert">

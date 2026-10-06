@@ -131,8 +131,11 @@ export function PaymentsPage() {
       <div style={{ background: 'var(--bg-elevated)', padding: '2rem', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
         <form onSubmit={handlePay}>
           <div className="field">
-            <span>Select Unpaid Bill</span>
+            <label htmlFor="payments-bill-select" style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '4px' }}>Select Unpaid Bill</label>
             <select
+              id="payments-bill-select"
+              name="selectedBillId"
+              aria-label="Select Unpaid Bill"
               className="input"
               value={selectedBillId}
               onChange={(e) => handleSelectBill(e.target.value)}
@@ -182,8 +185,11 @@ export function PaymentsPage() {
           </div>
 
           <div className="field">
-            <span>Amount Recieved (₹)</span>
+            <label htmlFor="payments-amount-input" style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '4px' }}>Amount Received (₹)</label>
             <input
+              id="payments-amount-input"
+              name="paymentAmount"
+              aria-label="Amount Received"
               className="input"
               type="number"
               step="0.01"
@@ -195,8 +201,11 @@ export function PaymentsPage() {
           </div>
 
           <div className="field">
-            <span>Transaction ID / Safe Ref</span>
+            <label htmlFor="payments-transaction-id" style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: '4px' }}>Transaction ID / Safe Ref</label>
             <input
+              id="payments-transaction-id"
+              name="paymentTransactionId"
+              aria-label="Transaction ID or Safe Ref"
               className="input"
               type="text"
               placeholder="E.g. UPI Ref, Card authorization ID"

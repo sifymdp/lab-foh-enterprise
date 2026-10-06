@@ -5,6 +5,7 @@ import { shouldShowAlertToast } from '../lib/alertRules'
 import { humanizeApiError } from '../lib/apiErrors'
 import { useAuth } from '../context/AuthContext'
 import { useFloor } from '../context/FloorContext'
+import { useSocket } from '../context/SocketContext'
 
 export function AIAlertsPage() {
   const { user } = useAuth()
@@ -29,20 +30,38 @@ export function AIAlertsPage() {
 
   useEffect(() => { load(showResolved) }, [load, showResolved])
 
+  const { on } = useSocket()
+
   useEffect(() => {
-    if (!user) return
-    const onAlert = (e: Event) => {
-      const alert = (e as CustomEvent<AIEvent>).detail
-      if (!shouldShowAlertToast(alert.eventType, user.role)) return
+    const unsubAlert = on('ai_alert', (payload: any) => {
+      const alert = payload as AIEvent
+      if (!user || !shouldShowAlertToast(alert.eventType, user.role)) return
       if (showResolved) return
       setAlerts((prev) => {
         if (prev.some((a) => a.id === alert.id)) return prev
         return [alert, ...prev]
       })
+    })
+
+    const unsubResolved = on('ai_alert_resolved', (payload: any) => {
+      const id = payload?.id
+      if (id) {
+        setAlerts((prev) => prev.filter((a) => a.id !== id))
+      }
+    })
+
+    return () => {
+      unsubAlert()
+      unsubResolved()
     }
-    window.addEventListener('foh:ai-alert', onAlert)
-    return () => window.removeEventListener('foh:ai-alert', onAlert)
-  }, [user, showResolved])
+  }, [on, user, showResolved])
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      load(showResolved)
+    }, 10000)
+    return () => clearInterval(interval)
+  }, [load, showResolved])
 
   const handleResolve = async (id: string) => {
     try {
@@ -60,6 +79,10 @@ export function AIAlertsPage() {
     DEPARTURE_ALERT: { bg: '#d1ecf1', color: '#0c5460', label: 'Departure' },
     SEATING_SUGGESTION: { bg: '#d4edda', color: '#155724', label: 'Seating' },
     SHIFT_REPORT: { bg: '#e2e3e5', color: '#383d41', label: 'Report' },
+    KITCHEN_ORDER_WAITING: { bg: '#fee2e2', color: '#dc2626', label: '⚠️ Order Waiting' },
+    KITCHEN_PREPARATION_DELAY: { bg: '#fee2e2', color: '#dc2626', label: '⚠️ Prep Delay' },
+    FOOD_READY: { bg: '#dcfce7', color: '#16a34a', label: '🍽️ Food Ready' },
+    FOOD_WAITING: { bg: '#fef3c7', color: '#d97706', label: '⚠️ Food Waiting' },
   }
 
   if (loading) return <div className="page-loading"><div className="spinner" /></div>

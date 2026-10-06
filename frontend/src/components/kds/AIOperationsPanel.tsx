@@ -241,6 +241,8 @@ export function AIOperationsPanel({ orders }: AIOperationsPanelProps) {
             <span className="kds-ai-voice-label">🎙️ Quick Dispatch:</span>
             <div className="kds-ai-input-wrap">
               <input
+                id="kds-voice-command-input"
+                name="voiceCommand"
                 className="kds-ai-input"
                 value={command}
                 onChange={(event) => {

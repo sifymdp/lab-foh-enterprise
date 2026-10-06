@@ -27,6 +27,8 @@ def list_events(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[AIEventOut]:
+    from app.services import kitchen_alert_service
+    kitchen_alert_service.evaluate_kitchen_alerts(db)
     return ai_service.list_alerts(db, resolved=resolved, user_role=current_user.role)
 
 

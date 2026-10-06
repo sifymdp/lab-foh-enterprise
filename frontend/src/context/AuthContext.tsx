@@ -82,8 +82,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 
+const fallbackAuthContext: AuthContextValue = {
+  user: null,
+  loading: true,
+  login: async () => {},
+  logout: () => {},
+}
+
 export function useAuth() {
   const ctx = useContext(AuthContext)
-  if (!ctx) throw new Error('useAuth must be used within AuthProvider')
+  if (!ctx) {
+    return fallbackAuthContext
+  }
   return ctx
 }
+

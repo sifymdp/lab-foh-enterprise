@@ -272,6 +272,9 @@ export function VoiceReceptionistModal({ isOpen, onClose }: Props) {
               </button>
             </div>
             <textarea
+              id="voice-transcript-input"
+              name="voiceTranscript"
+              aria-label="Voice conversation transcript"
               rows={3}
               value={transcript}
               onChange={(e) => setTranscript(e.target.value)}

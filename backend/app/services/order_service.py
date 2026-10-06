@@ -32,17 +32,19 @@ def _order_to_out(order: Order, db: Session | None = None) -> OrderOut:
         if t:
             table_num = t.number
 
-    return OrderOut(
-        id=order.id,
-        session_id=order.session_id,
-        table_id=order.table_id,
-        table_number=str(table_num) if table_num is not None else None,
-        placed_at=_fmt_dt(order.placed_at),
-        status=order.status,
-        source=getattr(order, "source", "bot") or "bot",
-        approval_status=getattr(order, "approval_status", "PENDING") or "PENDING",
-        notes=getattr(order, "notes", None),
-        items=[
+    items_out = []
+    max_prep = 15
+    for i in order.items:
+        p_time = 15
+        if getattr(i, "menu_item", None) and getattr(i.menu_item, "prep_time_minutes", None):
+            p_time = int(i.menu_item.prep_time_minutes) or 15
+        elif db and getattr(i, "menu_item_id", None):
+            mi = db.get(MenuItem, i.menu_item_id)
+            if mi and getattr(mi, "prep_time_minutes", None):
+                p_time = int(mi.prep_time_minutes) or 15
+        if p_time > max_prep:
+            max_prep = p_time
+        items_out.append(
             OrderItemOut(
                 id=i.id,
                 item_name=i.item_name,
@@ -52,9 +54,31 @@ def _order_to_out(order: Order, db: Session | None = None) -> OrderOut:
                 notes=getattr(i, "notes", None),
                 allergy_flag=bool(getattr(i, "allergy_flag", False)),
                 item_status=getattr(i, "item_status", "RECEIVED") or "RECEIVED",
+                prep_time_minutes=p_time,
             )
-            for i in order.items
-        ],
+        )
+
+    rec_at = getattr(order, "received_at", None) or order.placed_at
+    prep_at = getattr(order, "preparing_at", None)
+    rdy_at = getattr(order, "ready_at", None)
+    srv_at = getattr(order, "served_at", None)
+
+    return OrderOut(
+        id=order.id,
+        session_id=order.session_id,
+        table_id=order.table_id,
+        table_number=str(table_num) if table_num is not None else None,
+        placed_at=_fmt_dt(order.placed_at),
+        received_at=_fmt_dt(rec_at) if rec_at else None,
+        preparing_at=_fmt_dt(prep_at) if prep_at else None,
+        ready_at=_fmt_dt(rdy_at) if rdy_at else None,
+        served_at=_fmt_dt(srv_at) if srv_at else None,
+        status=order.status,
+        source=getattr(order, "source", "bot") or "bot",
+        approval_status=getattr(order, "approval_status", "PENDING") or "PENDING",
+        notes=getattr(order, "notes", None),
+        estimated_prep_time_minutes=max_prep,
+        items=items_out,
     )
 
 
@@ -68,12 +92,15 @@ def list_orders(
     session_id: str | None = None,
     tenant_id: str | None = None,
     branch_id: str | None = None,
+    approval_status: str | None = None,
 ) -> list[OrderOut]:
     q = db.query(Order)
     if tenant_id:
         q = q.filter(Order.tenant_id == tenant_id)
     if branch_id:
         q = q.filter(Order.branch_id == branch_id)
+    if approval_status:
+        q = q.filter(Order.approval_status == approval_status)
     if session_id:
         q = q.filter(Order.session_id == session_id)
     elif table_id:
@@ -83,7 +110,7 @@ def list_orders(
         else:
             q = q.filter(Order.table_id == table_id)
     rows = q.order_by(Order.placed_at.desc()).all()
-    return [_order_to_out(o) for o in rows]
+    return [_order_to_out(o, db) for o in rows]
 
 
 def create_order(
@@ -179,19 +206,20 @@ def create_order(
         sum(float(i.unit_price) * i.quantity for i in order.items),
         2,
     )
-    emit_sync(
-        "order_placed",
-        {
-            "tableId": table.id,
-            "tableNumber": table.number,
-            "floorId": table.floor_id,
-            "itemCount": item_count,
-            "totalAmount": total_amount,
-            "approvalStatus": order.approval_status,
-        },
-        room=str(table.floor_id),
-    )
-    if order.approval_status == "PENDING":
+    if order.approval_status == "APPROVED":
+        emit_sync(
+            "order_placed",
+            {
+                "tableId": table.id,
+                "tableNumber": table.number,
+                "floorId": table.floor_id,
+                "itemCount": item_count,
+                "totalAmount": total_amount,
+                "approvalStatus": order.approval_status,
+            },
+            room="*",
+        )
+    else:
         emit_sync(
             "order.pending_approval",
             {
@@ -202,7 +230,7 @@ def create_order(
                 "totalAmount": total_amount,
                 "notes": order.notes,
             },
-            room=str(table.floor_id),
+            room="*",
         )
     _emit_table_updated(table)
     return _order_to_out(order, db=db)
@@ -217,8 +245,13 @@ def approve_order(db: Session, order_id: str, user_id: str | None = None) -> Ord
     db.refresh(order)
 
     table = db.get(Table, order.table_id)
-    floor_id = str(table.floor_id) if table else "floor-1"
+    order_out = _order_to_out(order, db=db)
+    payload = order_out.model_dump(by_alias=True)
 
+    # Dispatch to Kitchen only AFTER Waiter approval
+    emit_sync("order_placed", payload, room="*")
+    emit_sync("kitchen_order_new", payload, room="*")
+    emit_sync("order_status_updated", payload, room="*")
     emit_sync(
         "order.approved",
         {
@@ -227,11 +260,12 @@ def approve_order(db: Session, order_id: str, user_id: str | None = None) -> Ord
             "tableNumber": table.number if table else None,
             "approvalStatus": "APPROVED",
         },
-        room=floor_id,
+        room="*",
     )
-    emit_sync("order.status.changed", {"orderId": order.id, "newStatus": order.status}, room=floor_id)
-    emit_sync("kitchen_order_new", {"orderId": order.id, "tableNumber": table.number if table else None}, room=floor_id)
-    return _order_to_out(order, db=db)
+    emit_sync("order.status.changed", {"orderId": order.id, "newStatus": order.status, "approvalStatus": "APPROVED"}, room="*")
+    if table:
+        _emit_table_updated(table)
+    return order_out
 
 
 def reject_order(db: Session, order_id: str, reason: str | None = None, user_id: str | None = None) -> OrderOut:
@@ -246,7 +280,6 @@ def reject_order(db: Session, order_id: str, reason: str | None = None, user_id:
     db.refresh(order)
 
     table = db.get(Table, order.table_id)
-    floor_id = str(table.floor_id) if table else "floor-1"
 
     emit_sync(
         "order.rejected",
@@ -257,9 +290,9 @@ def reject_order(db: Session, order_id: str, reason: str | None = None, user_id:
             "approvalStatus": "REJECTED",
             "reason": order.notes,
         },
-        room=floor_id,
+        room="*",
     )
-    emit_sync("order.status.changed", {"orderId": order.id, "newStatus": "REJECTED"}, room=floor_id)
+    emit_sync("order.status.changed", {"orderId": order.id, "newStatus": "REJECTED"}, room="*")
     return _order_to_out(order, db=db)
 
 

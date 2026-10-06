@@ -71,7 +71,9 @@ export function LiveStreamPopup({ table, floorId, onClose }: LiveStreamPopupProp
     const frameTimes: number[] = []
 
     const baseHost = getBackendOrigin()
-    const frameSrc = `${baseHost}/stream/${floorId}/frame?_table=${table.id}`
+    const savedUrl = encodeURIComponent(table.cameraUrl || localStorage.getItem('foh_camera_url') || '')
+    const savedMode = localStorage.getItem('foh_selected_camera_mode') || 'DEMO_STREAM'
+    const frameSrc = `${baseHost}/stream/${floorId}/frame?_table=${table.id}&stream_url=${savedUrl}&source_type=${savedMode}`
 
     async function pumpNextFrame() {
       if (!active || !mountedRef.current) return

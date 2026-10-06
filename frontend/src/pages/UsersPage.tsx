@@ -198,18 +198,24 @@ export function UsersPage() {
           <div className="modal" style={{ width: '450px' }}>
             <h3>{editingUser ? 'Edit Staff Member' : 'Create Staff Member'}</h3>
             <form onSubmit={handleSave}>
-              <label className="field">
+              <label className="field" htmlFor="user-form-name">
                 <span>Name</span>
                 <input
+                  id="user-form-name"
+                  name="userName"
+                  aria-label="Staff member name"
                   className="input"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   required
                 />
               </label>
-              <label className="field">
+              <label className="field" htmlFor="user-form-email">
                 <span>Email</span>
                 <input
+                  id="user-form-email"
+                  name="userEmail"
+                  aria-label="Staff member email"
                   type="email"
                   className="input"
                   value={email}
@@ -218,9 +224,12 @@ export function UsersPage() {
                 />
               </label>
               {!editingUser && (
-                <label className="field">
+                <label className="field" htmlFor="user-form-password">
                   <span>Password</span>
                   <input
+                    id="user-form-password"
+                    name="userPassword"
+                    aria-label="Staff member password"
                     type="password"
                     className="input"
                     value={password}
@@ -230,9 +239,12 @@ export function UsersPage() {
                   />
                 </label>
               )}
-              <label className="field">
+              <label className="field" htmlFor="user-form-role">
                 <span>Role</span>
                 <select
+                  id="user-form-role"
+                  name="userRole"
+                  aria-label="Staff member role"
                   className="input"
                   value={role}
                   onChange={(e) => setRole(e.target.value as Role)}
@@ -244,9 +256,12 @@ export function UsersPage() {
                   ))}
                 </select>
               </label>
-              <label className="field">
+              <label className="field" htmlFor="user-form-status">
                 <span>Account Status</span>
                 <select
+                  id="user-form-status"
+                  name="userStatus"
+                  aria-label="Account status"
                   className="input"
                   value={status}
                   onChange={(e) => setStatus(e.target.value)}
@@ -256,9 +271,12 @@ export function UsersPage() {
                   <option value="SUSPENDED">SUSPENDED</option>
                 </select>
               </label>
-              <label className="field">
+              <label className="field" htmlFor="user-form-branch">
                 <span>Branch Assignment</span>
                 <select
+                  id="user-form-branch"
+                  name="userBranch"
+                  aria-label="Branch assignment"
                   className="input"
                   value={branchId}
                   onChange={(e) => setBranchId(e.target.value)}

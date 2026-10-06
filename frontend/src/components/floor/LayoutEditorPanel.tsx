@@ -102,9 +102,12 @@ function SectionPanel({
     <aside className="table-panel layout-panel">
       <PanelHeader title="Dining section" subtitle="Layout" onClose={onClose} />
       <p className="muted panel-hint">Drag to move · corner handle to expand or shrink the zone.</p>
-      <label className="field">
+      <label className="field" htmlFor="layout-section-name">
         <span>Name</span>
         <input
+          id="layout-section-name"
+          name="sectionName"
+          aria-label="Section name"
           className="input"
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -118,9 +121,12 @@ function SectionPanel({
           }
         />
       </label>
-      <label className="field">
+      <label className="field" htmlFor="layout-section-color">
         <span>Border color</span>
         <input
+          id="layout-section-color"
+          name="sectionColor"
+          aria-label="Border color"
           type="color"
           className="input input-color"
           value={color}
@@ -193,9 +199,12 @@ function LabelPanel({
     <aside className="table-panel layout-panel">
       <PanelHeader title="Floor marker" subtitle={label.kind} onClose={onClose} />
       <p className="muted panel-hint">Entrance, kitchen, bar, or custom areas on your floor plan.</p>
-      <label className="field">
+      <label className="field" htmlFor="layout-marker-text">
         <span>Label text</span>
         <input
+          id="layout-marker-text"
+          name="markerText"
+          aria-label="Label text"
           className="input"
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -251,27 +260,36 @@ function BoundsFields({
 
   return (
     <div className="layout-fields layout-fields--grid">
-      <label className="field">
+      <label className="field" htmlFor="bounds-field-x">
         <span>X</span>
         <input
+          id="bounds-field-x"
+          name="boundsX"
+          aria-label="Coordinate X"
           type="number"
           className="input"
           value={Math.round(bounds.x)}
           onChange={(e) => set('x', Number(e.target.value))}
         />
       </label>
-      <label className="field">
+      <label className="field" htmlFor="bounds-field-y">
         <span>Y</span>
         <input
+          id="bounds-field-y"
+          name="boundsY"
+          aria-label="Coordinate Y"
           type="number"
           className="input"
           value={Math.round(bounds.y)}
           onChange={(e) => set('y', Number(e.target.value))}
         />
       </label>
-      <label className="field">
+      <label className="field" htmlFor="bounds-field-width">
         <span>Width</span>
         <input
+          id="bounds-field-width"
+          name="boundsWidth"
+          aria-label="Coordinate Width"
           type="number"
           className="input"
           min={40}
@@ -279,9 +297,12 @@ function BoundsFields({
           onChange={(e) => set('width', Number(e.target.value))}
         />
       </label>
-      <label className="field">
+      <label className="field" htmlFor="bounds-field-height">
         <span>Height</span>
         <input
+          id="bounds-field-height"
+          name="boundsHeight"
+          aria-label="Coordinate Height"
           type="number"
           className="input"
           min={40}
@@ -334,18 +355,24 @@ export function FloorLayoutToolbar({
         <button type="button" className="btn btn-secondary btn-sm" onClick={() => onAddLabel('BAR')}>
           + Bar area
         </button>
-        <label className="canvas-size-field">
+        <label className="canvas-size-field" htmlFor="canvas-width">
           <span>W</span>
           <input
+            id="canvas-width"
+            name="canvasWidth"
+            aria-label="Canvas width"
             type="number"
             className="input input-xs"
             value={floor.width}
             onChange={(e) => onCanvasSize(Number(e.target.value), floor.height)}
           />
         </label>
-        <label className="canvas-size-field">
+        <label className="canvas-size-field" htmlFor="canvas-height">
           <span>H</span>
           <input
+            id="canvas-height"
+            name="canvasHeight"
+            aria-label="Canvas height"
             type="number"
             className="input input-xs"
             value={floor.height}

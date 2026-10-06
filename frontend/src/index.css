@@ -466,6 +466,7 @@ p { margin: 0; }
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 @media (min-width: 900px) {
@@ -491,6 +492,43 @@ p { margin: 0; }
   flex: 1;
   padding: 1.25rem;
   overflow: auto;
+}
+
+/* Phone Frame & Mobile View Enhancements */
+.phone-simulator-frame *::-webkit-scrollbar {
+  width: 4px;
+}
+.phone-simulator-frame *::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+}
+
+@media (max-width: 768px) {
+  .app-main {
+    padding: 0.5rem 0.4rem;
+  }
+  .app-topbar {
+    padding: 0.5rem 0.75rem;
+    gap: 0.4rem;
+  }
+  .topbar-title h1 {
+    font-size: 0.95rem;
+  }
+  .topbar-title .muted {
+    display: none;
+  }
+  .mobile-nav {
+    padding: 0.35rem 0.5rem;
+    gap: 0.2rem;
+    scrollbar-width: none;
+  }
+  .mobile-nav::-webkit-scrollbar {
+    display: none;
+  }
+  .mobile-nav a {
+    padding: 0.35rem 0.65rem;
+    font-size: 0.75rem;
+  }
 }
 
 /* Role badges */
