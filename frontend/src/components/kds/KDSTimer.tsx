@@ -46,9 +46,11 @@ export function KDSTimer({
 
   const expectedText = status === 'PREPARING' && typeof estimatedMinutes === 'number'
     ? `Expected: ${String(Math.floor((estimatedMinutes * 60) / 60)).padStart(2, '0')}:${String(Math.floor((estimatedMinutes * 60) % 60)).padStart(2, '0')}`
-    : undefined
+    : status === 'READY'
+      ? 'Serve target: 03:00'
+      : undefined
 
-  const warningSeconds = warningMinutes * 60
+  const warningSeconds = (status === 'READY' ? 3 : warningMinutes) * 60
   const estimateSeconds = (estimatedMinutes ?? 10) * 60
   const lateAfterSeconds = estimateSeconds + 2 * 60
   let colorClass = 'timer-ok'

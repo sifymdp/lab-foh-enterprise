@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 # Configurable defaults
 RECEIVED_ALERT_MINUTES = getattr(settings, "received_alert_minutes", 5.0) or 5.0
 PREPARATION_ALERT_MINUTES = getattr(settings, "preparation_alert_minutes", 15.0) or 15.0
-READY_ALERT_MINUTES = getattr(settings, "ready_alert_minutes", 5.0) or 5.0
+READY_ALERT_MINUTES = getattr(settings, "ready_alert_minutes", 3.0) or 3.0
 
 
 def _get_active_order_alert(db: Session, order_id: str, event_type: str) -> AIEvent | None:
@@ -118,11 +118,31 @@ def on_order_status_transition(db: Session, order: Order, new_status: str) -> No
                 db,
                 AIEventCreate(
                     event_type="FOOD_READY",
-                    message=f"{table_label} Order #{order_num} is ready to serve. Please collect the food from the kitchen.",
+                    message=f"🔔 {table_label} Order #{order_num} is READY to serve! Please collect within 3 minutes.",
                     target_role="WAITER",
                     table_id=order.table_id,
-                    metadata_json=json.dumps({"order_id": order.id, "table_id": order.table_id, "status": "READY"}),
+                    metadata_json=json.dumps({
+                        "order_id": order.id,
+                        "table_id": order.table_id,
+                        "table_number": table.number if table else order.table_id,
+                        "status": "READY",
+                        "estimated_serve_minutes": 3,
+                        "ready_at": now.isoformat(),
+                    }),
                 ),
+            )
+            emit_sync(
+                "food_ready",
+                {
+                    "orderId": order.id,
+                    "tableId": order.table_id,
+                    "tableNumber": table.number if table else order.table_id,
+                    "status": "READY",
+                    "estimatedServeMinutes": 3,
+                    "readyAt": now.isoformat(),
+                    "message": f"{table_label} Order #{order_num} is READY to serve! Please collect within 3 minutes.",
+                },
+                room="*",
             )
 
     elif new_status == "SERVED":
@@ -137,7 +157,7 @@ def evaluate_kitchen_alerts(db: Session) -> dict[str, int]:
     now = datetime.now(timezone.utc)
     rec_thresh = getattr(settings, "received_alert_minutes", 5.0) or 5.0
     prep_thresh = getattr(settings, "preparation_alert_minutes", 15.0) or 15.0
-    ready_thresh = getattr(settings, "ready_alert_minutes", 5.0) or 5.0
+    ready_thresh = getattr(settings, "ready_alert_minutes", 3.0) or 3.0
 
     created = 0
     active_orders = (
@@ -224,7 +244,7 @@ def evaluate_kitchen_alerts(db: Session) -> dict[str, int]:
                             db,
                             AIEventCreate(
                                 event_type="FOOD_WAITING",
-                                message=f"⚠️ FOOD WAITING: {table_label} Order #{order_num} has been READY for {int(elapsed_min)} minutes. Please collect and serve the order.",
+                                message=f"⚠️ FOOD OVERDUE: {table_label} Order #{order_num} has been READY for {int(elapsed_min)} mins (limit: 3 mins)! Please collect and serve immediately.",
                                 target_role="WAITER",
                                 table_id=order.table_id,
                                 metadata_json=json.dumps({

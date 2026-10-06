@@ -2,7 +2,7 @@ import type { Role } from '../types'
 
 export const RECEIVED_ALERT_MINUTES = 5
 export const PREPARATION_ALERT_MINUTES = 15
-export const READY_ALERT_MINUTES = 5
+export const READY_ALERT_MINUTES = 3
 
 const ALERT_TOAST_ROLES: Record<string, Role[]> = {
   DIRTY_ALERT: ['WAITER'],

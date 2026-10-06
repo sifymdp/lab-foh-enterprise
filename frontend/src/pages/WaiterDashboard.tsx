@@ -1,10 +1,165 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { ordersApi, type Order } from '../api/extensions'
 import { useSocket } from '../context/SocketContext'
 import { formatTime } from '../lib/formatters'
 import { PhoneFrameContainer } from '../components/common/PhoneFrameContainer'
+
+function ReadyServeTimer({ readyAt }: { readyAt?: string | null }) {
+  const [now, setNow] = useState(Date.now())
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [])
+
+  const readyMs = readyAt ? new Date(readyAt).getTime() : now
+  const validReadyMs = isNaN(readyMs) ? now : readyMs
+  const elapsedSeconds = Math.max(0, Math.floor((now - validReadyMs) / 1000))
+  const targetSeconds = 3 * 60 // 3 minutes = 180s
+  const remainingSeconds = targetSeconds - elapsedSeconds
+
+  if (remainingSeconds > 0) {
+    const mins = Math.floor(remainingSeconds / 60)
+    const secs = remainingSeconds % 60
+    return (
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '4px',
+          fontWeight: 700,
+          color: remainingSeconds <= 60 ? '#d97706' : '#15803d',
+          fontSize: '0.8rem',
+        }}
+      >
+        <span>⏳ Serve within: {mins}:{secs.toString().padStart(2, '0')}</span>
+      </span>
+    )
+  }
+
+  const overdueSecs = Math.abs(remainingSeconds)
+  const overdueMins = Math.floor(overdueSecs / 60)
+  const overdueRemSecs = overdueSecs % 60
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '4px',
+        fontWeight: 800,
+        color: '#b91c1c',
+        fontSize: '0.8rem',
+      }}
+    >
+      <span>⚠️ Overdue +{overdueMins}m {overdueRemSecs.toString().padStart(2, '0')}s</span>
+    </span>
+  )
+}
+
+function ReadyFoodCard({
+  order,
+  onMarkServed,
+  isLoading,
+}: {
+  order: Order
+  onMarkServed: (orderId: string, tableNumber?: string | null) => void
+  isLoading: boolean
+}) {
+  const tableNum =
+    order.tableNumber ||
+    (order as any).table_number ||
+    (order.tableId ? String(order.tableId).replace('tbl-', '').replace('t-', '') : 'N/A')
+
+  return (
+    <div
+      style={{
+        background: '#f0fdf4',
+        border: '2px solid #22c55e',
+        borderRadius: '12px',
+        padding: '12px 14px',
+        marginBottom: '10px',
+        boxShadow: '0 4px 12px rgba(34, 197, 94, 0.15)',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '1.3rem' }}>🛎️</span>
+          <div>
+            <strong style={{ fontSize: '1.05rem', color: '#14532d' }}>Table {tableNum}</strong>
+            <div style={{ fontSize: '0.72rem', color: '#166534', fontWeight: 700 }}>Food Ready to Serve!</div>
+          </div>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <ReadyServeTimer readyAt={order.readyAt || (order as any).ready_at || order.placedAt} />
+          <div style={{ fontSize: '0.68rem', color: '#4b5563', marginTop: '2px' }}>Estimate: 3 mins</div>
+        </div>
+      </div>
+
+      <div
+        style={{
+          background: '#ffffff',
+          borderRadius: '8px',
+          padding: '8px 10px',
+          marginBottom: '10px',
+          border: '1px solid #bbf7d0',
+          fontSize: '0.78rem',
+          color: '#374151',
+        }}
+      >
+        <div style={{ fontWeight: 600, color: '#1e293b', marginBottom: '4px' }}>Items to Serve:</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+          {(order.items || []).map((it, idx) => (
+            <span
+              key={idx}
+              style={{
+                background: '#e0f2fe',
+                color: '#0369a1',
+                borderRadius: '6px',
+                padding: '2px 8px',
+                fontWeight: 600,
+                fontSize: '0.75rem',
+              }}
+            >
+              {it.quantity}× {it.itemName}
+            </span>
+          ))}
+        </div>
+        {order.notes && (
+          <div style={{ fontSize: '0.72rem', color: '#6b7280', marginTop: '4px', fontStyle: 'italic' }}>
+            Note: {order.notes}
+          </div>
+        )}
+      </div>
+
+      <button
+        type="button"
+        disabled={isLoading}
+        onClick={() => onMarkServed(order.id, tableNum)}
+        style={{
+          width: '100%',
+          padding: '10px',
+          borderRadius: '8px',
+          background: '#16a34a',
+          color: '#ffffff',
+          border: 'none',
+          fontWeight: 800,
+          fontSize: '0.88rem',
+          cursor: isLoading ? 'not-allowed' : 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '8px',
+          boxShadow: '0 2px 6px rgba(22, 163, 74, 0.3)',
+          transition: 'all 0.15s ease',
+        }}
+      >
+        {isLoading ? 'Updating...' : '✓ Mark as Served'}
+      </button>
+    </div>
+  )
+}
 
 export function WaiterDashboard() {
   const navigate = useNavigate()
@@ -19,6 +174,32 @@ export function WaiterDashboard() {
   const [loadingOrders, setLoadingOrders] = useState(false)
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null)
   const [statusMessage, setStatusMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null)
+
+  const readyOrders = useMemo(
+    () => recentOrders.filter((o) => o.status === 'READY'),
+    [recentOrders]
+  )
+
+  const playReadyChime = useCallback(() => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext
+      if (!AudioCtx) return
+      const ctx = new AudioCtx()
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = 'sine'
+      osc.frequency.setValueAtTime(587.33, ctx.currentTime) // D5
+      osc.frequency.setValueAtTime(880, ctx.currentTime + 0.12) // A5
+      gain.gain.setValueAtTime(0.25, ctx.currentTime)
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5)
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.start()
+      osc.stop(ctx.currentTime + 0.5)
+    } catch {
+      // Audio autoplay policy
+    }
+  }, [])
 
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
     setStatusMessage({ text, type })
@@ -75,18 +256,25 @@ export function WaiterDashboard() {
     const unsub5 = on('order_status_updated', (data: any) => {
       fetchOrders()
       if (data?.status === 'READY') {
-        showToast(`🍽️ FOOD READY: Table ${data?.tableNumber || data?.tableId || ''} is ready to collect!`, 'success')
+        playReadyChime()
+        showToast(`🍽️ FOOD READY: Table ${data?.tableNumber || data?.tableId || ''} is ready to serve! Please collect within 3 mins.`, 'success')
       }
     })
     const unsub6 = on('table_updated', () => fetchTables())
     const unsub7 = on('ai_alert', (data: any) => {
       if (data?.eventType === 'FOOD_READY') {
-        showToast(`🍽️ FOOD READY: ${data.message}`, 'success')
+        playReadyChime()
+        showToast(`🍽️ FOOD READY: ${data.message || 'Food is ready to serve! (Estimate: 3 mins)'}`, 'success')
         fetchOrders()
       } else if (data?.eventType === 'FOOD_WAITING') {
-        showToast(`⚠️ FOOD WAITING: ${data.message}`, 'error')
+        showToast(`⚠️ FOOD OVERDUE: ${data.message}`, 'error')
         fetchOrders()
       }
+    })
+    const unsub8 = on('food_ready', (data: any) => {
+      playReadyChime()
+      showToast(`🍽️ FOOD READY: Table ${data?.tableNumber || data?.tableId || ''} is ready! Please collect and serve within 3 mins.`, 'success')
+      fetchOrders()
     })
 
     return () => {
@@ -97,8 +285,23 @@ export function WaiterDashboard() {
       unsub5()
       unsub6()
       unsub7()
+      unsub8()
     }
-  }, [on, fetchOrders, fetchTables])
+  }, [on, fetchOrders, fetchTables, playReadyChime])
+
+  const handleMarkServed = async (orderId: string, tableNumber?: string | null) => {
+    setActionLoadingId(orderId)
+    try {
+      await ordersApi.updateStatus(orderId, 'SERVED')
+      showToast(`✓ Table ${tableNumber || ''} order marked as SERVED!`, 'success')
+      await fetchOrders()
+      await fetchTables()
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to update order status', 'error')
+    } finally {
+      setActionLoadingId(null)
+    }
+  }
 
   const handleApprove = async (orderId: string, tableNumber?: string | null) => {
     setActionLoadingId(orderId)
@@ -180,6 +383,43 @@ export function WaiterDashboard() {
           >
             ✕
           </button>
+        </div>
+      )}
+
+      {/* ─── READY TO SERVE BANNER / QUEUE ─── */}
+      {readyOrders.length > 0 && (
+        <div style={{ marginBottom: '1.2rem' }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '8px 12px',
+              background: '#dcfce7',
+              border: '1.5px solid #22c55e',
+              borderRadius: '10px',
+              marginBottom: '8px',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ fontSize: '1.1rem' }}>🛎️</span>
+              <strong style={{ fontSize: '0.85rem', color: '#15803d' }}>
+                Food Ready to Serve ({readyOrders.length})
+              </strong>
+            </div>
+            <span style={{ fontSize: '0.72rem', color: '#166534', fontWeight: 700 }}>
+              Target: 3 mins
+            </span>
+          </div>
+
+          {readyOrders.map((ro) => (
+            <ReadyFoodCard
+              key={ro.id}
+              order={ro}
+              isLoading={actionLoadingId === ro.id}
+              onMarkServed={handleMarkServed}
+            />
+          ))}
         </div>
       )}
 
@@ -282,11 +522,24 @@ export function WaiterDashboard() {
           }}
         >
           <span>🍳 Kitchen</span>
-          {recentOrders.length > 0 && (
+          {readyOrders.length > 0 ? (
+            <span
+              style={{
+                background: '#16a34a',
+                color: '#ffffff',
+                fontSize: '0.68rem',
+                fontWeight: 800,
+                padding: '1px 6px',
+                borderRadius: '10px',
+              }}
+            >
+              🛎️ {readyOrders.length} Ready
+            </span>
+          ) : recentOrders.length > 0 ? (
             <span style={{ fontSize: '0.72rem', color: '#16a34a', fontWeight: 700 }}>
               ({recentOrders.length})
             </span>
-          )}
+          ) : null}
         </button>
       </div>
 
@@ -649,29 +902,79 @@ export function WaiterDashboard() {
                       display: 'flex',
                       justifyContent: 'space-between',
                       alignItems: 'center',
+                      gap: '8px',
                     }}
                   >
-                    <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                         <strong style={{ fontSize: '0.9rem' }}>Table {tableNum}</strong>
-                        {isReady && <span style={{ fontSize: '0.75rem' }}>🛎️ READY TO SERVE!</span>}
+                        {isReady ? (
+                          <span
+                            style={{
+                              background: '#dcfce7',
+                              color: '#15803d',
+                              padding: '2px 6px',
+                              borderRadius: '4px',
+                              fontSize: '0.72rem',
+                              fontWeight: 700,
+                            }}
+                          >
+                            🛎️ READY TO SERVE
+                          </span>
+                        ) : (
+                          <span
+                            style={{
+                              background: isPreparing ? '#dbeafe' : '#fef3c7',
+                              color: isPreparing ? '#1d4ed8' : '#b45309',
+                              padding: '2px 6px',
+                              borderRadius: '4px',
+                              fontSize: '0.7rem',
+                              fontWeight: 700,
+                            }}
+                          >
+                            {ro.status}
+                          </span>
+                        )}
                       </div>
                       <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>
                         {(ro.items || []).length} items • {formatTime(ro.placedAt || (ro as any).placed_at)}
                       </div>
+                      {isReady && (
+                        <div style={{ marginTop: '4px' }}>
+                          <ReadyServeTimer readyAt={ro.readyAt || (ro as any).ready_at || ro.placedAt} />
+                        </div>
+                      )}
                     </div>
-                    <span
-                      style={{
-                        background: isReady ? '#dcfce7' : isPreparing ? '#dbeafe' : '#fef3c7',
-                        color: isReady ? '#15803d' : isPreparing ? '#1d4ed8' : '#b45309',
-                        padding: '4px 8px',
-                        borderRadius: '6px',
-                        fontSize: '0.72rem',
-                        fontWeight: 700,
-                      }}
-                    >
-                      {ro.status}
-                    </span>
+                    {isReady ? (
+                      <button
+                        type="button"
+                        disabled={actionLoadingId === ro.id}
+                        onClick={() => handleMarkServed(ro.id, tableNum)}
+                        style={{
+                          padding: '6px 12px',
+                          borderRadius: '6px',
+                          background: '#16a34a',
+                          color: '#ffffff',
+                          border: 'none',
+                          fontWeight: 700,
+                          fontSize: '0.78rem',
+                          cursor: actionLoadingId === ro.id ? 'not-allowed' : 'pointer',
+                          whiteSpace: 'nowrap',
+                          boxShadow: '0 2px 4px rgba(22, 163, 74, 0.25)',
+                        }}
+                      >
+                        {actionLoadingId === ro.id ? 'Saving...' : '✓ Serve'}
+                      </button>
+                    ) : (
+                      <span
+                        style={{
+                          fontSize: '0.72rem',
+                          color: 'var(--text-muted)',
+                        }}
+                      >
+                        {isPreparing ? 'Cooking...' : 'Queued'}
+                      </span>
+                    )}
                   </div>
                 )
               })}

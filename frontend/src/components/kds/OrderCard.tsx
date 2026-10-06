@@ -54,9 +54,16 @@ export function OrderCard({ order, onStatusChange }: OrderCardProps) {
 
   const isWaitingTooLong = isReceived && elapsed >= RECEIVED_ALERT_MINUTES * 60
   const isPrepDelayed = isPreparing && elapsed > estSeconds
-  const isFoodWaiting = isReady && elapsed >= READY_ALERT_MINUTES * 60
+  const readyTargetSeconds = READY_ALERT_MINUTES * 60 // 3 minutes = 180s
+  const remainingReadySeconds = Math.max(0, readyTargetSeconds - elapsed)
+  const isFoodWaiting = isReady && elapsed >= readyTargetSeconds
   const isOverdue = isWaitingTooLong || isPrepDelayed || isFoodWaiting
-  const overdueMins = isPrepDelayed ? Math.floor((elapsed - estSeconds) / 60) : Math.floor(elapsed / 60)
+  const overdueMins = isPrepDelayed
+    ? Math.floor((elapsed - estSeconds) / 60)
+    : isFoodWaiting
+    ? Math.floor((elapsed - readyTargetSeconds) / 60)
+    : Math.floor(elapsed / 60)
+  const overdueSecs = isFoodWaiting ? (elapsed - readyTargetSeconds) % 60 : 0
 
   const items = order.items || []
   const totalItemCount = items.reduce((sum: number, i: any) => sum + (i.quantity || 1), 0)
@@ -172,7 +179,11 @@ export function OrderCard({ order, onStatusChange }: OrderCardProps) {
             {isReady && (
               <>
                 <span>🛎️ Ready for: {formatElapsed(elapsed)}</span>
-                <span style={{ color: '#16a34a', fontWeight: 600 }}>🍽️ Ready to serve</span>
+                <span style={{ color: isFoodWaiting ? '#dc2626' : '#16a34a', fontWeight: 700 }}>
+                  {isFoodWaiting
+                    ? `⚠️ Overdue +${overdueMins}m ${overdueSecs}s`
+                    : `⏳ Serve target: 3:00 (${formatElapsed(remainingReadySeconds)} left)`}
+                </span>
               </>
             )}
             {isServed && (
@@ -195,13 +206,15 @@ export function OrderCard({ order, onStatusChange }: OrderCardProps) {
             </div>
           )}
           {isReady && !isFoodWaiting && (
-            <div style={{ background: '#f0fdf4', border: '1px solid #86efac', color: '#15803d', padding: '2px 6px', borderRadius: '4px', fontWeight: 600, fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
-              🍽️ Waiting for waiter to collect
+            <div style={{ background: '#f0fdf4', border: '1px solid #86efac', color: '#15803d', padding: '3px 8px', borderRadius: '4px', fontWeight: 600, fontSize: '0.7rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span>🛎️ Waiter notified: Food is ready to serve</span>
+              <span style={{ fontWeight: 700, color: '#16a34a' }}>Target: 3m (⏳ {formatElapsed(remainingReadySeconds)} left)</span>
             </div>
           )}
           {isFoodWaiting && (
-            <div style={{ background: '#fffbeb', border: '1px solid #fcd34d', color: '#b45309', padding: '2px 6px', borderRadius: '4px', fontWeight: 700, fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
-              ⚠️ FOOD WAITING: Ready for {Math.floor(elapsed / 60)}m. Waiter pickup needed!
+            <div style={{ background: '#fef2f2', border: '1px solid #f87171', color: '#b91c1c', padding: '3px 8px', borderRadius: '4px', fontWeight: 700, fontSize: '0.7rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span>⚠️ FOOD OVERDUE: Ready for {Math.floor(elapsed / 60)}m!</span>
+              <span>Pickup target was 3 mins. Waiter needed!</span>
             </div>
           )}
         </div>

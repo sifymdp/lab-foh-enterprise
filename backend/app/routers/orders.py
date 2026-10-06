@@ -175,7 +175,33 @@ def update_order_status(
         {"orderId": order_id, "oldStatus": old_status, "newStatus": new_status, "order": payload},
         room="*",
     )
-    if new_status == "SERVED":
+    if new_status == "READY":
+        table_num = table.number if table else (order.table_id or "?")
+        emit_sync(
+            "food_ready",
+            {
+                "orderId": order_id,
+                "tableId": order.table_id,
+                "tableNumber": table_num,
+                "order": payload,
+                "estimatedServeMinutes": 3,
+                "readyAt": order.ready_at.isoformat() if hasattr(order, "ready_at") and order.ready_at else None,
+                "message": f"Table {table_num}: Food is READY! Please serve within 3 minutes.",
+            },
+            room="*",
+        )
+        emit_sync(
+            "ai_alert",
+            {
+                "eventType": "FOOD_READY",
+                "tableId": order.table_id,
+                "tableNumber": table_num,
+                "message": f"🍽️ Table {table_num} food is READY! Estimate serve time: 3 mins.",
+                "estimatedServeMinutes": 3,
+            },
+            room="*",
+        )
+    elif new_status == "SERVED":
         emit_sync(
             "order_served",
             {"id": order_id, "orderId": order_id, "order": payload},

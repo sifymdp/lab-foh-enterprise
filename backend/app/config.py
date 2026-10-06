@@ -81,7 +81,7 @@ class Settings(BaseSettings):
     # Kitchen alert thresholds (minutes)
     received_alert_minutes: float = 5.0
     preparation_alert_minutes: float = 15.0
-    ready_alert_minutes: float = 5.0
+    ready_alert_minutes: float = 3.0
 
     # Customer self-service booking & OTP settings (Member 4 feature)
     customer_otp_expiry_minutes: int = 10

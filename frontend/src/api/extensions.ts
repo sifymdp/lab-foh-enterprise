@@ -227,6 +227,8 @@ export interface Order {
   source?: 'bot' | 'waiter' | string
   approvalStatus?: 'PENDING' | 'APPROVED' | 'REJECTED' | string
   notes?: string | null
+  readyAt?: string | null
+  estimatedServeMinutes?: number | null
   items: OrderItem[]
 }
 
@@ -249,6 +251,11 @@ export const ordersApi = {
     apiFetch<Order>(`/orders/${orderId}/reject`, {
       method: 'POST',
       body: JSON.stringify({ reason }),
+    }),
+  updateStatus: (orderId: string, status: string, notes?: string) =>
+    apiFetch<Order>(`/orders/${orderId}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status, notes }),
     }),
 }
 

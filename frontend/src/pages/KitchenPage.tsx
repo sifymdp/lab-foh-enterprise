@@ -31,12 +31,13 @@ const NEXT_ACTION: Record<string, { label: string; nextStatus: string }> = {
 
 function ElapsedTimer({ order }: { order: KitchenOrder }) {
   const [elapsed, setElapsed] = useState(0)
-  const estMins = order.estimated_prep_time_minutes || 15
+  const isReady = order.status === 'READY'
+  const estMins = isReady ? 3 : (order.estimated_prep_time_minutes || 15)
   const estSeconds = estMins * 60
 
   useEffect(() => {
-    const startFrom = order.preparation_started_at || order.placed_at
-    const endAt = order.served_at || order.ready_at || null
+    const startFrom = isReady ? (order.ready_at || order.placed_at) : (order.preparation_started_at || order.placed_at)
+    const endAt = order.served_at || (isReady ? null : order.ready_at) || null
 
     const update = () => {
       setElapsed(elapsedSeconds(startFrom, endAt))
@@ -45,10 +46,11 @@ function ElapsedTimer({ order }: { order: KitchenOrder }) {
     if (endAt) return
     const id = setInterval(update, 1000)
     return () => clearInterval(id)
-  }, [order.placed_at, order.preparation_started_at, order.ready_at, order.served_at])
+  }, [order.placed_at, order.preparation_started_at, order.ready_at, order.served_at, isReady])
 
   const isLate = order.status !== 'SERVED' && elapsed > estSeconds
   const overdueMins = Math.floor((elapsed - estSeconds) / 60)
+  const remainingSeconds = Math.max(0, estSeconds - elapsed)
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -65,22 +67,41 @@ function ElapsedTimer({ order }: { order: KitchenOrder }) {
       >
         📥 {formatTime(order.placed_at) || 'Just now'}
       </span>
-      <span
-        style={{
-          fontSize: '0.74rem',
-          color: '#0369a1',
-          fontWeight: 600,
-          background: '#e0f2fe',
-          padding: '2px 6px',
-          borderRadius: '4px',
-        }}
-        title={`Estimated food preparation duration`}
-      >
-        ⏳ Est: {estMins}m
-      </span>
+      {isReady ? (
+        <span
+          style={{
+            fontSize: '0.74rem',
+            color: isLate ? '#b91c1c' : '#15803d',
+            fontWeight: 700,
+            background: isLate ? '#fee2e2' : '#dcfce7',
+            padding: '2px 6px',
+            borderRadius: '4px',
+            border: isLate ? '1px solid #f87171' : '1px solid #bbf7d0',
+          }}
+          title="Serve target window: 3 minutes"
+        >
+          {isLate
+            ? `⚠️ Overdue +${overdueMins}m`
+            : `⏳ Serve within 3m (${formatElapsed(remainingSeconds)} left)`}
+        </span>
+      ) : (
+        <span
+          style={{
+            fontSize: '0.74rem',
+            color: '#0369a1',
+            fontWeight: 600,
+            background: '#e0f2fe',
+            padding: '2px 6px',
+            borderRadius: '4px',
+          }}
+          title="Estimated food preparation duration"
+        >
+          ⏳ Est: {estMins}m
+        </span>
+      )}
       <span
         className={`kds-elapsed-badge ${isLate ? 'is-late' : elapsed > estSeconds * 0.75 ? 'is-warning' : ''}`}
-        title={`Elapsed preparation duration`}
+        title={isReady ? 'Duration waiting for waiter pickup' : 'Elapsed preparation duration'}
         style={isLate ? { animation: 'pulse 1.5s infinite', background: '#fee2e2', color: '#b91c1c', border: '1px solid #f87171', fontWeight: 800 } : {}}
       >
         ⏱ {formatElapsed(elapsed)} {isLate ? `(🚨 +${overdueMins}m late)` : ''}
