@@ -1,0 +1,54 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: foh-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-12345678}
+      POSTGRES_DB: foh_management
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d foh_management"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - ./foh.db:/data/foh.db
+    environment:
+      - DATABASE_URL=postgresql+psycopg://postgres:12345678@postgres:5432/foh_management
+      - CAMERA_ENABLED=true
+      - CAMERA_SCAN_INTERVAL_SECONDS=10
+      - YOLO_TABLE_STATE_MODEL_PATH=models/table_cleanliness_best.pt
+      - CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - VITE_USE_MOCK=false
+      - VITE_API_URL=http://localhost:8000
+      - VITE_SOCKET_URL=http://localhost:8000
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:

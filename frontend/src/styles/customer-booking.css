@@ -1,0 +1,425 @@
+/* ==========================================================================
+   CUSTOMER BOOKING & RESERVATION STAND STYLES
+   Unified Front-of-House Enterprise Design System
+   Matches SayedFarid Master Foundation Theme:
+   --bg: #f0f2f5, --surface: #ffffff, --border: #e2e8f0, --primary: #c41e3a
+   ========================================================================== */
+
+/* ── Page Layout ── */
+.customer-page {
+  min-height: 100vh;
+  box-sizing: border-box;
+  padding: 2rem 1.5rem;
+  background: var(--bg, #f0f2f5);
+  color: var(--text, #0f172a);
+  font-family: inherit;
+}
+
+/* ── Customer Login Container ── */
+.customer-login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+  background: var(--bg, #f0f2f5);
+  color: var(--text, #0f172a);
+  box-sizing: border-box;
+}
+
+.customer-login-panel {
+  width: 100%;
+  max-width: 460px;
+}
+
+.customer-login-card {
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: var(--radius-lg, 16px);
+  padding: 2.25rem;
+  box-shadow: var(--shadow-lg, 0 12px 40px rgba(15, 23, 42, 0.08));
+}
+
+.customer-login-card .brand-mark.lg {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 54px;
+  height: 54px;
+  margin-bottom: 1.25rem;
+  border-radius: 14px;
+  font-size: 1.15rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  color: #ffffff;
+  background: linear-gradient(135deg, var(--primary, #c41e3a) 0%, #9f1239 100%);
+  box-shadow: 0 4px 14px rgba(196, 30, 58, 0.3);
+}
+
+.customer-login-card h1 {
+  margin: 0 0 0.5rem;
+  font-size: 1.65rem;
+  font-weight: 700;
+  color: var(--text, #0f172a);
+  letter-spacing: -0.02em;
+}
+
+.customer-login-card .muted {
+  margin-bottom: 1.5rem;
+  color: var(--text-muted, #64748b);
+  line-height: 1.5;
+  font-size: 0.9rem;
+}
+
+/* ── Contact Type Switch (Email / Mobile) ── */
+.contact-switch {
+  display: flex;
+  gap: 0.5rem;
+  padding: 4px;
+  margin-bottom: 1.25rem;
+  border-radius: var(--radius, 10px);
+  background: var(--surface-2, #f8f9fb);
+  border: 1px solid var(--border, #e2e8f0);
+}
+
+.contact-switch .btn {
+  flex: 1;
+  min-height: 36px;
+  font-size: 0.85rem;
+  border-radius: 8px;
+}
+
+/* ── Header Bar ── */
+.customer-page > header {
+  max-width: 1320px;
+  margin: 0 auto 1.75rem;
+  padding: 1.25rem 1.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  border-radius: var(--radius-lg, 14px);
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e2e8f0);
+  box-shadow: var(--shadow-sm, 0 1px 3px rgba(15, 23, 42, 0.06));
+}
+
+.customer-page > header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text, #0f172a);
+  letter-spacing: -0.02em;
+}
+
+.customer-page > header .muted {
+  margin: 0.35rem 0 0;
+  color: var(--text-muted, #64748b);
+  font-size: 0.875rem;
+}
+
+/* ── Content Panels ── */
+.customer-page .panel {
+  max-width: 1320px;
+  margin: 0 auto 1.5rem;
+  padding: 1.75rem;
+  border-radius: var(--radius-lg, 14px);
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e2e8f0);
+  box-shadow: var(--shadow-sm, 0 1px 3px rgba(15, 23, 42, 0.06));
+}
+
+.customer-page .panel h2 {
+  margin: 0 0 1rem;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text, #0f172a);
+}
+
+/* ── Filter / Query Grid ── */
+.customer-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1.25rem;
+  margin-bottom: 1.25rem;
+}
+
+.customer-page .field,
+.customer-login-page .field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.customer-page .field > span,
+.customer-login-page .field > span {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text, #0f172a);
+}
+
+.customer-page .input,
+.customer-login-page .input {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 44px;
+  padding: 0 1rem;
+  border: 1px solid var(--border-strong, #cbd5e1);
+  border-radius: var(--radius, 10px);
+  outline: none;
+  color: var(--text, #0f172a);
+  background: var(--surface, #ffffff);
+  font-family: inherit;
+  font-size: 0.9375rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.customer-page .input:focus,
+.customer-login-page .input:focus {
+  border-color: var(--primary, #c41e3a);
+  box-shadow: 0 0 0 3px var(--primary-soft, #fef2f2);
+}
+
+/* ── Buttons ── */
+.customer-page .btn,
+.customer-login-page .btn {
+  min-height: 42px;
+  padding: 0 1.25rem;
+  border-radius: var(--radius, 10px);
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  text-decoration: none;
+}
+
+.customer-page .btn-primary,
+.customer-login-page .btn-primary {
+  background: var(--primary, #c41e3a);
+  color: #ffffff;
+  border: 1px solid transparent;
+  box-shadow: var(--shadow-sm);
+}
+
+.customer-page .btn-primary:hover:not(:disabled),
+.customer-login-page .btn-primary:hover:not(:disabled) {
+  background: var(--primary-hover, #9f1239);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.customer-page .btn-secondary,
+.customer-login-page .btn-secondary {
+  background: var(--surface, #ffffff);
+  color: var(--text, #0f172a);
+  border: 1px solid var(--border-strong, #cbd5e1);
+}
+
+.customer-page .btn-secondary:hover:not(:disabled),
+.customer-login-page .btn-secondary:hover:not(:disabled) {
+  background: var(--surface-2, #f8f9fb);
+  border-color: var(--text-muted, #64748b);
+}
+
+.customer-page .btn-sm,
+.customer-login-page .btn-sm {
+  min-height: 36px;
+  padding: 0 0.85rem;
+  font-size: 0.825rem;
+}
+
+.customer-page .btn-block,
+.customer-login-page .btn-block {
+  width: 100%;
+  margin-top: 0.75rem;
+}
+
+/* ── Floor Plan Section ── */
+.customer-layout {
+  overflow: hidden;
+}
+
+.customer-layout__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.customer-layout canvas,
+.customer-layout svg {
+  border-radius: var(--radius-lg, 14px);
+  border: 1px solid var(--border, #e2e8f0);
+}
+
+/* ── AI Recommendation Options Grid ── */
+.customer-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 1rem;
+  margin-top: 1.25rem;
+}
+
+.customer-options .option {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1.25rem;
+  border-radius: var(--radius-lg, 14px);
+  background: var(--surface-2, #f8f9fb);
+  border: 1px solid var(--border, #e2e8f0);
+  transition: all 0.15s ease;
+}
+
+.customer-options .option:hover {
+  transform: translateY(-2px);
+  border-color: var(--primary, #c41e3a);
+  box-shadow: var(--shadow-md);
+  background: var(--surface, #ffffff);
+}
+
+.customer-options .option strong {
+  font-size: 1.1rem;
+  color: var(--text, #0f172a);
+}
+
+.customer-options .option span {
+  color: var(--text-muted, #64748b);
+  font-size: 0.875rem;
+}
+
+.customer-options .option .btn {
+  margin-top: 0.5rem;
+}
+
+/* ── Error & Notification Banners ── */
+.form-error {
+  margin-top: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius, 10px);
+  color: var(--danger, #dc2626);
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+/* ── Temporary Booking Hold Panel ── */
+.customer-hold-card {
+  max-width: 580px;
+  margin: 2rem auto;
+  text-align: center;
+  padding: 2.5rem 2rem;
+  border-radius: var(--radius-lg, 16px);
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e2e8f0);
+  box-shadow: var(--shadow-lg, 0 12px 40px rgba(15, 23, 42, 0.08));
+}
+
+.customer-hold-timer {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.65rem 1.25rem;
+  border-radius: 9999px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #b45309;
+  font-weight: 700;
+  font-size: 1.25rem;
+  margin: 1.25rem 0;
+}
+
+/* ── Bookings List Article ── */
+.customer-booking-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 1.25rem 1.5rem;
+  border-radius: var(--radius-lg, 14px);
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e2e8f0);
+  margin-bottom: 1rem;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.15s ease;
+}
+
+.customer-booking-card:hover {
+  box-shadow: var(--shadow-md);
+  border-color: var(--border-strong, #cbd5e1);
+}
+
+.customer-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.65rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.customer-badge--confirmed {
+  background: #dcfce7;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+}
+
+.customer-badge--pending {
+  background: #fef3c7;
+  color: #b45309;
+  border: 1px solid #fde68a;
+}
+
+.customer-badge--cancelled {
+  background: #fee2e2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+
+/* ── Responsive ── */
+@media (max-width: 1000px) {
+  .customer-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .customer-page {
+    padding: 1rem 0.75rem;
+  }
+
+  .customer-page > header {
+    padding: 1.25rem 1rem;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .customer-page > header > div:last-child {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .customer-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .customer-layout__header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .customer-booking-card {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
