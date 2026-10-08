@@ -1,0 +1,12 @@
+# Host virtualenvs are built against the host's Python/OS — never copy them in.
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.env
+# Mounted as a volume by docker-compose instead (~250MB of demo video).
+camera_uploads/
+# Databases come from the compose bind mount, not the image.
+*.db

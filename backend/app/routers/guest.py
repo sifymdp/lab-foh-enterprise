@@ -1,0 +1,2059 @@
+import html
+import json
+from collections import defaultdict
+from datetime import datetime, timezone
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import HTMLResponse
+from sqlalchemy.orm import Session
+
+from app.config import settings
+from app.database import get_db
+from app.models import Bill, DiningSession, Table, TableQRCode
+from app.schemas.common import CamelModel
+from app.services import menu_service
+from app.services.floor_service import get_current_floor
+from app.services.table_service import active_session_for_table
+from app.services import ai_service
+from app.schemas.ai import AIEventCreate
+from urllib.parse import quote
+
+from app.services.order_service import get_bill, list_orders, mark_paid, request_bill
+
+router = APIRouter(prefix="/guest", tags=["guest"])
+
+RESTAURANT_NAME = "FOH Restaurant"
+CATEGORY_ORDER = [
+    "North Indian",
+    "South Indian",
+    "Chinese & Pan-Asian",
+    "Italian & Continental",
+    "Desserts",
+    "Liquor & Cocktails",
+    "Starters",
+    "Mains",
+    "Drinks",
+]
+
+
+def _get_or_create_qr_for_table(db: Session, table: Table) -> TableQRCode:
+    qr = (
+        db.query(TableQRCode)
+        .filter(TableQRCode.table_id == table.id, TableQRCode.is_active.is_(True))
+        .first()
+    )
+    if qr:
+        return qr
+
+    from app.core.ids import new_id
+    token = f"t{table.number}".lower().replace(" ", "").replace("-", "")
+    existing = db.query(TableQRCode).filter(TableQRCode.token == token).first()
+    if existing:
+        existing.table_id = table.id
+        existing.is_active = True
+        qr = existing
+    else:
+        qr = TableQRCode(
+            id=new_id(),
+            table_id=table.id,
+            token=token,
+            is_active=True,
+        )
+        db.add(qr)
+    db.commit()
+    db.refresh(qr)
+    return qr
+
+
+def _resolve_qr(db: Session, identifier: Any = None) -> TableQRCode:
+    clean_ident = str(identifier).strip() if (identifier and isinstance(identifier, str)) else ""
+    if not clean_ident:
+        table = db.query(Table).order_by(Table.number.asc()).first()
+        if not table:
+            raise HTTPException(404, "No active dining tables found")
+        return _get_or_create_qr_for_table(db, table)
+
+    ident = clean_ident
+
+    # 1. Direct active token match
+    qr = (
+        db.query(TableQRCode)
+        .filter(TableQRCode.token == ident, TableQRCode.is_active.is_(True))
+        .first()
+    )
+    if qr:
+        return qr
+
+    # 2. Check if identifier is table_id
+    table = db.query(Table).filter(Table.id == ident).first()
+    if not table:
+        # Check if identifier is table number (e.g. '1', 'T1', 'Table 1')
+        table = db.query(Table).filter(Table.number == ident).first()
+    if not table:
+        clean = ident.replace("tbl-", "").replace("table-", "").lstrip("Tt ")
+        table = db.query(Table).filter(
+            (Table.number == clean)
+            | (Table.number == f"T{clean}")
+            | (Table.number == f"Table {clean}")
+        ).first()
+    if not table:
+        # Fallback to first table on active floor so guests never hit dead ends
+        table = db.query(Table).order_by(Table.number.asc()).first()
+
+    if not table:
+        raise HTTPException(404, "Table not found")
+
+    return _get_or_create_qr_for_table(db, table)
+
+
+def _slugify(text: str) -> str:
+    return "".join(c if c.isalnum() else "-" for c in text.lower()).strip("-")
+
+
+def _get_allergen_badges_html(name: str, desc: str, category: str) -> str:
+    if category in ("Liquor & Cocktails", "Drinks"):
+        return ""
+    text = f"{name} {desc}".lower()
+    badges = []
+
+    non_veg = any(
+        k in text
+        for k in [
+            "chicken", "mutton", "lamb", "prawn", "prawns", "fish", "sea bass",
+            "steak", "meat", "duck", "egg", "calamari", "pork"
+        ]
+    )
+    has_dairy = any(
+        k in text
+        for k in [
+            "butter", "ghee", "cream", "cheese", "paneer", "burrata", "alfredo",
+            "rabri", "gelato", "tiramisu", "mascarpone", "milk"
+        ]
+    )
+    has_nuts = any(
+        k in text
+        for k in ["cashew", "almond", "walnut", "peanut", "pistachio", "nut"]
+    )
+    has_gluten = any(
+        k in text
+        for k in [
+            "parotta", "naan", "roti", "sheermal", "noodles", "dumpling", "dim sum",
+            "wheat", "flour", "bread", "pasta", "fettuccine", "brioche", "tiramisu",
+            "fondant", "sourdough", "crust"
+        ]
+    )
+
+    if not non_veg:
+        if not has_dairy and "honey" not in text:
+            badges.append('<span class="tag tag--vegan">🌱 Vegan</span>')
+        else:
+            badges.append('<span class="tag tag--veg">🥦 Vegetarian</span>')
+
+    if not has_gluten:
+        badges.append('<span class="tag tag--gf">🌾 Gluten-Free</span>')
+
+    if not has_dairy:
+        badges.append('<span class="tag tag--df">🥛 Dairy-Free</span>')
+
+    if not has_nuts:
+        badges.append('<span class="tag tag--nf">🥜 Nut-Free</span>')
+    else:
+        badges.append('<span class="tag tag--nuts">⚠️ Contains Nuts</span>')
+
+    if not badges:
+        return ""
+    return f'<div class="tags-list">{"".join(badges[:3])}</div>'
+
+
+def _build_guest_menu_html(
+    *,
+    token: str,
+    table: Table,
+    restaurant_name: str,
+    items_by_category: dict[str, list],
+    guest_name: str | None,
+    session_id: str | None,
+) -> str:
+    menu_json = json.dumps(
+        {
+            "token": token,
+            "tableId": table.id,
+            "sessionId": session_id,
+            "tableNumber": table.number,
+            "guestName": guest_name or "",
+            "apiBase": settings.guest_menu_base_url.rstrip("/"),
+        }
+    )
+
+    ordered_cats = [c for c in CATEGORY_ORDER if c in items_by_category]
+    ordered_cats += sorted(k for k in items_by_category if k not in CATEGORY_ORDER)
+
+    sidebar_html = []
+    sections_html = []
+    for i, category in enumerate(ordered_cats):
+        slug = _slugify(category)
+        sidebar_html.append(
+            f'<button type="button" class="side-tab{" is-active" if i == 0 else ""}" '
+            f'data-cat="cat-{slug}" onclick="selectCategory(\'cat-{slug}\')">'
+            f'{html.escape(category)}</button>'
+        )
+        items_html = []
+        for item in items_by_category[category]:
+            desc = html.escape(item.description or "")
+            tags_html = _get_allergen_badges_html(item.name, item.description or "", category)
+            items_html.append(
+                f"""
+                <article class="menu-item" data-id="{html.escape(item.id)}"
+                         data-name="{html.escape(item.name)}"
+                         data-price="{float(item.price):.2f}"
+                         onclick="handleItemCardClick(event, '{html.escape(item.id)}')">
+                  <div class="menu-item__row">
+                    <div class="menu-item__info">
+                      <h3>{html.escape(item.name)}</h3>
+                      {tags_html}
+                      {f'<p class="desc">{desc}</p>' if desc else ''}
+                      <p class="price">₹{float(item.price):.2f}</p>
+                    </div>
+                    <div class="stepper-wrap" onclick="event.stopPropagation()">
+                      <button type="button" class="btn-add-initial" id="add-btn-{html.escape(item.id)}" onclick="changeQty('{html.escape(item.id)}', 1)">
+                        + ADD
+                      </button>
+                      <div class="stepper" id="stepper-{html.escape(item.id)}" style="display:none;">
+                        <button type="button" class="stepper__btn" onclick="changeQty('{html.escape(item.id)}', -1)" aria-label="Remove one">−</button>
+                        <span class="stepper__qty" id="qty-{html.escape(item.id)}">0</span>
+                        <button type="button" class="stepper__btn stepper__btn--add" onclick="changeQty('{html.escape(item.id)}', 1)" aria-label="Add one">+</button>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="item-custom-note-wrap" id="note-wrap-{html.escape(item.id)}" onclick="event.stopPropagation()">
+                    <div class="note-input-row">
+                      <span class="note-chef-icon" title="Special instructions for Chef">👨‍🍳</span>
+                      <input type="text" class="item-custom-note-input" id="note-{html.escape(item.id)}"
+                             placeholder="Add note for Chef (e.g. add oil, less spicy)..."
+                             oninput="handleNoteInputChange('{html.escape(item.id)}', this.value)"
+                             onkeydown="handleNoteKeyDown(event, '{html.escape(item.id)}')" />
+                      <button type="button" class="btn-save-note" id="btn-save-note-{html.escape(item.id)}"
+                              onclick="confirmItemNote('{html.escape(item.id)}')"
+                              title="Confirm and send note to kitchen">
+                        Add Note ↵
+                      </button>
+                    </div>
+                    <div class="note-chips-row">
+                      <button type="button" class="note-chip" onclick="quickApplyNote('{html.escape(item.id)}', 'Add oil')">💧 Add oil</button>
+                      <button type="button" class="note-chip" onclick="quickApplyNote('{html.escape(item.id)}', 'Less spicy')">🌶️ Less spicy</button>
+                      <button type="button" class="note-chip" onclick="quickApplyNote('{html.escape(item.id)}', 'Extra spicy')">🔥 Extra spicy</button>
+                      <button type="button" class="note-chip" onclick="quickApplyNote('{html.escape(item.id)}', 'No onion/garlic')">🧅 No onion</button>
+                      <button type="button" class="note-chip" onclick="quickApplyNote('{html.escape(item.id)}', 'Less oil')">🌿 Less oil</button>
+                      <button type="button" class="note-chip" onclick="quickApplyNote('{html.escape(item.id)}', 'Extra crisp')">✨ Extra crisp</button>
+                    </div>
+                    <div class="note-saved-badge" id="note-badge-{html.escape(item.id)}" style="display:none;">
+                      <span>👨‍🍳 <strong>Note for Chef:</strong> "<span id="note-badge-text-{html.escape(item.id)}"></span>"</span>
+                      <button type="button" class="note-saved-badge__clear" onclick="clearItemNote('{html.escape(item.id)}')" title="Clear note">✕</button>
+                    </div>
+                  </div>
+                </article>
+                """
+            )
+        sections_html.append(
+            f'<section class="category{" is-active" if i == 0 else ""}" id="cat-{slug}">'
+            f'<h2>{html.escape(category)}</h2>{"".join(items_html)}</section>'
+        )
+
+    is_custom_name = bool(guest_name and not guest_name.startswith("Guest Table"))
+    welcome_line = (
+        f"Welcome <strong>{html.escape(guest_name)}</strong> · Table {html.escape(table.number)}"
+        if is_custom_name
+        else f"Table {html.escape(table.number)}"
+    )
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{html.escape(restaurant_name)} — Table {html.escape(table.number)}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {{
+      --ink: #1c1b19; --cream: #faf6ef; --green: #26402f; --green-dark: #182a1e;
+      --gold: #c89b3c; --gold-dark: #a9812e; --line: #e4dfd3; --muted: #6b6357; --red: #b3261e;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0; font-family: 'Inter', system-ui, sans-serif;
+      background: var(--cream); color: var(--ink); padding-bottom: 84px;
+    }}
+    h1, h2 {{ font-family: 'Fraunces', serif; }}
+    header {{
+      background: var(--green); color: #fff; padding: 16px 16px;
+      position: sticky; top: 0; z-index: 20;
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    }}
+    header h1 {{ margin: 0; font-size: 1.3rem; font-weight: 600; letter-spacing: -0.01em; }}
+    header p {{ margin: 3px 0 0; opacity: 0.82; font-size: 0.82rem; }}
+    .header-user-badge {{
+      display: inline-flex; align-items: center; gap: 6px;
+      cursor: pointer; padding: 2px 8px; border-radius: 6px;
+      background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);
+      transition: background 0.15s ease;
+    }}
+    .header-user-badge:hover {{ background: rgba(255,255,255,0.2); }}
+    .welcome-card {{
+      background: #ffffff;
+      border-radius: 20px;
+      padding: 26px 22px;
+      max-width: 390px;
+      width: 90%;
+      text-align: center;
+      box-shadow: 0 20px 45px rgba(0,0,0,0.24);
+      border: 1px solid var(--line);
+    }}
+    .btn-party-pill {{
+      flex: 1;
+      padding: 8px 0;
+      border-radius: 8px;
+      border: 1.5px solid var(--line);
+      background: var(--cream);
+      color: var(--ink);
+      font-weight: 700;
+      font-size: 0.9rem;
+      cursor: pointer;
+      font-family: inherit;
+      transition: all 0.15s ease;
+    }}
+    .btn-party-pill.is-selected {{
+      background: var(--green);
+      color: #ffffff;
+      border-color: var(--green);
+    }}
+    .track-btn {{
+      flex-shrink: 0; position: relative; background: rgba(255,255,255,0.12); color: #fff;
+      border: 1px solid rgba(255,255,255,0.25); border-radius: 10px; padding: 8px 12px;
+      font-size: 0.78rem; font-weight: 600; cursor: pointer; font-family: 'Inter', sans-serif;
+    }}
+    .track-btn__dot {{
+      position: absolute; top: -4px; right: -4px; width: 10px; height: 10px;
+      border-radius: 50%; background: var(--gold); display: none;
+    }}
+    .track-btn.has-active .track-btn__dot {{ display: block; }}
+
+    .layout {{ display: flex; align-items: flex-start; }}
+    .sidebar {{
+      width: 92px; flex-shrink: 0; position: sticky; top: 64px;
+      background: var(--green-dark); height: calc(100vh - 64px);
+      display: flex; flex-direction: column; padding: 10px 0; overflow-y: auto;
+    }}
+    .side-tab {{
+      border: none; background: transparent; color: rgba(255,255,255,0.65);
+      font-family: 'Inter', sans-serif; font-size: 0.76rem; font-weight: 600;
+      padding: 14px 8px; cursor: pointer; text-align: center; line-height: 1.2;
+      border-left: 3px solid transparent;
+    }}
+    .side-tab.is-active {{ background: var(--cream); color: var(--green); border-left-color: var(--gold); }}
+
+    main {{ flex: 1; min-width: 0; padding: 16px; }}
+    .category {{ display: none; }}
+    .category.is-active {{ display: block; }}
+    .category h2 {{ font-size: 1.15rem; font-weight: 500; margin: 0 0 14px; color: var(--green); }}
+    .menu-item {{
+      display: flex; flex-direction: column; gap: 8px;
+      background: #fff; border-radius: 14px; padding: 14px;
+      margin-bottom: 10px; border: 1px solid var(--line);
+    }}
+    .menu-item__row {{ display: flex; gap: 12px; align-items: center; width: 100%; }}
+    .menu-item__info {{ flex: 1; min-width: 0; }}
+    .menu-item h3 {{ margin: 0 0 3px; font-size: 0.96rem; font-weight: 600; font-family: 'Inter', sans-serif; }}
+    .tags-list {{ display: flex; flex-wrap: wrap; gap: 5px; margin: 4px 0 6px; }}
+    .tag {{
+      font-size: 0.68rem; font-weight: 700; padding: 2px 7px; border-radius: 6px;
+      letter-spacing: 0.02em; display: inline-flex; align-items: center; gap: 3px;
+    }}
+    .tag--vegan {{ background: #dcfce7; color: #15803d; border: 1px solid #bbf7d0; }}
+    .tag--veg {{ background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }}
+    .tag--gf {{ background: #fef3c7; color: #b45309; border: 1px solid #fde68a; }}
+    .tag--df {{ background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; }}
+    .tag--nf {{ background: #f3e8ff; color: #6b21a8; border: 1px solid #e9d5ff; }}
+    .tag--nuts {{ background: #ffedd5; color: #9a3412; border: 1px solid #fed7aa; }}
+    .desc {{ margin: 0 0 6px; font-size: 0.8rem; color: var(--muted); line-height: 1.4; }}
+    .price {{ margin: 0; font-weight: 700; color: var(--green); font-size: 0.95rem; }}
+    .btn-add-initial {{
+      background: #fff; color: var(--green); border: 1.5px solid var(--gold);
+      border-radius: 999px; padding: 7px 18px; font-size: 0.85rem; font-weight: 700;
+      cursor: pointer; font-family: 'Inter', sans-serif; box-shadow: 0 2px 5px rgba(0,0,0,0.06);
+      transition: all 0.15s ease; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+    }}
+    .btn-add-initial:active {{
+      transform: scale(0.94); background: var(--gold); color: #fff;
+    }}
+    .stepper-wrap {{ display: flex; align-items: center; justify-content: flex-end; }}
+    .stepper {{
+      display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+      background: var(--cream); border-radius: 999px; padding: 4px;
+      border: 1px solid var(--line);
+    }}
+    .stepper__btn {{
+      width: 32px; height: 32px; border-radius: 50%; border: none;
+      background: #fff; color: var(--green); font-size: 1.15rem; font-weight: 700;
+      cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.1); line-height: 1;
+      display: flex; align-items: center; justify-content: center;
+      touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+    }}
+    .stepper__btn:active {{
+      transform: scale(0.92);
+    }}
+    .stepper__btn--add {{ background: var(--gold); color: #fff; }}
+    .stepper__qty {{ min-width: 18px; text-align: center; font-weight: 700; font-size: 0.92rem; }}
+    .menu-item {{
+      display: flex; flex-direction: column; gap: 8px;
+      background: #fff; border-radius: 14px; padding: 14px;
+      margin-bottom: 10px; border: 1px solid var(--line);
+      cursor: pointer; transition: transform 0.15s, box-shadow 0.15s;
+      -webkit-tap-highlight-color: transparent;
+    }}
+    .menu-item:active {{
+      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    }}
+    .item-custom-note-wrap {{
+      display: none; width: 100%; margin-top: 6px; padding-top: 8px; border-top: 1px dashed var(--line);
+    }}
+    .item-custom-note-wrap.is-visible {{ display: flex; flex-direction: column; gap: 8px; }}
+    .note-input-row {{
+      display: flex; align-items: center; gap: 8px; width: 100%;
+    }}
+    .note-chef-icon {{
+      font-size: 1.15rem; flex-shrink: 0;
+    }}
+    .item-custom-note-input {{
+      flex: 1; border: 1.5px solid #cbd5e1; border-radius: 8px; padding: 8px 12px;
+      font-size: 0.82rem; font-family: 'Inter', sans-serif; background: #f8fafc; color: var(--ink);
+      transition: all 0.15s ease;
+    }}
+    .item-custom-note-input:focus {{
+      outline: none; border-color: var(--gold); background: #fff; box-shadow: 0 0 0 3px rgba(217,119,6,0.15);
+    }}
+    .btn-save-note {{
+      background: var(--gold); color: #fff; border: none; border-radius: 8px;
+      padding: 8px 14px; font-size: 0.8rem; font-weight: 700; cursor: pointer;
+      font-family: 'Inter', sans-serif; flex-shrink: 0; transition: all 0.15s ease;
+      display: inline-flex; align-items: center; gap: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      touch-action: manipulation;
+    }}
+    .btn-save-note:active {{ transform: scale(0.95); background: var(--gold-dark); }}
+    .btn-save-note.is-saved {{ background: #15803d; }}
+    .note-chips-row {{
+      display: flex; flex-wrap: wrap; gap: 6px; width: 100%;
+    }}
+    .note-chip {{
+      background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; border-radius: 999px;
+      padding: 4px 10px; font-size: 0.74rem; font-weight: 600; cursor: pointer;
+      font-family: 'Inter', sans-serif; transition: all 0.15s ease;
+      touch-action: manipulation;
+    }}
+    .note-chip:hover, .note-chip:active {{
+      background: #fef3c7; color: #92400e; border-color: #fde68a; transform: scale(0.96);
+    }}
+    .note-saved-badge {{
+      display: flex; align-items: center; justify-content: space-between;
+      background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 8px;
+      padding: 6px 10px; font-size: 0.78rem; color: #065f46; font-weight: 600;
+      animation: fadeIn 0.2s ease;
+    }}
+    .note-saved-badge__clear {{
+      background: transparent; border: none; color: #9ca3af; font-size: 0.85rem;
+      cursor: pointer; padding: 2px 6px; border-radius: 4px;
+    }}
+    .note-saved-badge__clear:hover {{ color: #dc2626; background: #fee2e2; }}
+    .order-overall-notes-box {{
+      margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--line);
+    }}
+    .review-chef-note {{
+      background: #fffbeb; color: #b45309; border: 1px solid #fde68a;
+      border-radius: 6px; padding: 4px 8px; font-size: 0.76rem; font-weight: 600;
+      margin-top: 4px; display: inline-flex; align-items: center; gap: 4px;
+    }}
+
+    .cart-bar {{
+      position: fixed; bottom: 0; left: 0; right: 0;
+      background: var(--gold); color: #fff; border: none;
+      padding: 15px 18px calc(15px + env(safe-area-inset-bottom));
+      display: none; align-items: center; justify-content: space-between;
+      z-index: 25; cursor: pointer; font-family: 'Inter', sans-serif;
+      box-shadow: 0 -4px 20px rgba(0,0,0,0.18);
+    }}
+    .cart-bar.is-visible {{ display: flex; }}
+    .cart-bar__left {{ font-weight: 600; font-size: 0.92rem; }}
+    .cart-bar__right {{ font-weight: 700; font-size: 0.92rem; }}
+
+    .overlay {{
+      position: fixed; inset: 0; background: rgba(24,42,30,0.55);
+      backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+      display: none; align-items: flex-end; z-index: 50;
+    }}
+    .overlay--center {{ align-items: center; justify-content: center; }}
+    .overlay--top {{ z-index: 70; }}
+    .overlay--payment {{ z-index: 60; }}
+    .overlay.is-open {{ display: flex; }}
+    .sheet {{
+      background: var(--cream); width: 100%; max-height: 82vh; overflow-y: auto;
+      border-radius: 20px 20px 0 0; padding: 18px 18px calc(18px + env(safe-area-inset-bottom));
+    }}
+    .sheet__header {{ display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }}
+    .sheet__header h2 {{ margin: 0; font-size: 1.15rem; }}
+    .sheet__close {{
+      border: none; background: var(--line); width: 30px; height: 30px; border-radius: 50%;
+      font-size: 1rem; cursor: pointer; color: var(--ink);
+    }}
+    .review-line {{
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      padding: 10px 0; border-bottom: 1px solid var(--line);
+    }}
+    .review-line__name {{ font-size: 0.9rem; font-weight: 600; }}
+    .review-line__price {{ font-size: 0.78rem; color: var(--muted); }}
+    .review-total {{
+      display: flex; justify-content: space-between; align-items: center;
+      margin-top: 14px; padding-top: 12px; font-weight: 700; font-size: 1.05rem; color: var(--green);
+    }}
+    .btn-confirm {{
+      width: 100%; margin-top: 16px; border: none; background: var(--green); color: #fff;
+      padding: 14px; border-radius: 12px; font-size: 0.95rem; font-weight: 600; cursor: pointer;
+      font-family: 'Inter', sans-serif;
+    }}
+    .btn-confirm:disabled {{ opacity: 0.4; cursor: not-allowed; }}
+    .empty-note {{ color: var(--muted); font-size: 0.88rem; padding: 20px 0; text-align: center; }}
+
+    .status-tracker {{ background: #fff; border-radius: 14px; padding: 16px; margin-bottom: 12px; border: 1px solid var(--line); }}
+    .status-tracker__items {{ font-size: 0.83rem; color: var(--muted); margin-bottom: 12px; }}
+    .status-steps {{ display: flex; align-items: center; }}
+    .status-step {{ display: flex; flex-direction: column; align-items: center; flex: 1; position: relative; }}
+    .status-step__dot {{
+      width: 22px; height: 22px; border-radius: 50%; background: var(--line);
+      display: flex; align-items: center; justify-content: center; z-index: 1;
+      font-size: 0.7rem; color: #fff; font-weight: 700;
+    }}
+    .status-step__label {{ font-size: 0.66rem; color: var(--muted); margin-top: 6px; text-align: center; }}
+    .status-step__line {{ position: absolute; top: 11px; left: 50%; width: 100%; height: 2px; background: var(--line); z-index: 0; }}
+    .status-step:first-child .status-step__line {{ display: none; }}
+    .status-step.is-done .status-step__dot {{ background: var(--green); }}
+    .status-step.is-done .status-step__line {{ background: var(--green); }}
+    .status-step.is-current .status-step__dot {{ background: var(--gold); }}
+    .status-tracker.rejected .status-step__dot {{ background: var(--red) !important; }}
+    .status-tracker.rejected .status-step__line {{ background: var(--red) !important; }}
+
+    .toast {{
+      position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
+      background: var(--green); color: #fff; padding: 10px 18px; border-radius: 10px;
+      font-size: 0.88rem; font-weight: 500; display: none; z-index: 60;
+    }}
+    .toast.error {{ background: var(--red); }}
+    #bill-banner:empty {{ display: none; }}
+    @keyframes bill-pulse {{
+      0%, 100% {{ box-shadow: 0 0 0 0 rgba(200,155,60,0.5); }}
+      50% {{ box-shadow: 0 0 0 6px rgba(200,155,60,0); }}
+    }}
+    #top-banners {{
+      position: fixed; left: 16px; right: 16px; z-index: 30;
+      display: flex; flex-direction: column; gap: 8px;
+    }}
+    .bill-banner-btn {{
+      width: 100%; border: none; background: var(--gold); color: #fff;
+      padding: 14px 16px; display: flex; justify-content: space-between; align-items: center;
+      font-family: 'Inter', sans-serif; font-size: 0.92rem; font-weight: 700; cursor: pointer;
+      border-radius: 12px; animation: bill-pulse 1.6s infinite; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }}
+    .bill-banner-btn.is-paid {{ background: var(--green); animation: none; }}
+    .pay-field {{
+      width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px;
+      font-family: 'Inter', sans-serif; font-size: 0.88rem; margin-bottom: 10px;
+    }}
+    .pay-row {{ display: flex; gap: 10px; }}
+    .pay-row .pay-field {{ flex: 1; }}
+    .demo-note {{ font-size: 0.75rem; color: var(--muted); text-align: center; margin-top: 8px; }}
+
+    .pay-method-grid {{ display: flex; flex-direction: column; gap: 10px; }}
+    .pay-method-btn {{
+      display: flex; align-items: center; gap: 14px; width: 100%; text-align: left;
+      border: 1px solid var(--line); background: #fff; border-radius: 14px; padding: 14px 16px;
+      cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s;
+      font-family: 'Inter', sans-serif;
+    }}
+    .pay-method-btn:hover {{ border-color: var(--gold); box-shadow: 0 2px 8px rgba(0,0,0,0.06); }}
+    .pay-method-btn__icon {{
+      width: 42px; height: 42px; border-radius: 11px; display: flex; align-items: center;
+      justify-content: center; font-size: 20px; flex-shrink: 0; background: var(--cream);
+    }}
+    .pay-method-btn__text {{ flex: 1; }}
+    .pay-method-btn__title {{ font-weight: 700; font-size: 0.94rem; color: var(--ink); }}
+    .pay-method-btn__sub {{ font-size: 0.76rem; color: var(--muted); margin-top: 2px; }}
+    .pay-method-btn__chevron {{ color: var(--muted); font-size: 1rem; }}
+
+    .payment-card {{
+      background: var(--cream); border-radius: 20px; padding: 28px 24px;
+      max-width: 360px; width: calc(100% - 32px); text-align: center;
+    }}
+    .payment-card h2 {{ margin: 0 0 4px; font-size: 1.1rem; }}
+    .payment-card .amount {{ font-size: 1.4rem; font-weight: 700; color: var(--green); margin: 4px 0 18px; }}
+    .payment-card img {{ border-radius: 14px; border: 1px solid var(--line); margin-bottom: 14px; }}
+    .ordering-locked .stepper__btn {{ opacity: 0.35; pointer-events: none; }}
+    .overlay--center {{ align-items: center; }}
+    .action-card {{
+      background: var(--cream); border-radius: 18px; padding: 28px 24px;
+      max-width: 340px; width: calc(100% - 32px); text-align: center;
+    }}
+    .action-card__icon {{ font-size: 36px; margin-bottom: 10px; }}
+    .action-card h2 {{ margin: 0 0 8px; font-size: 1.15rem; }}
+    .action-card p {{ margin: 0 0 20px; font-size: 0.9rem; color: var(--muted); line-height: 1.4; }}
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1 style="cursor:pointer;" onclick="openWelcomeNameModal()">{html.escape(restaurant_name)}</h1>
+      <p id="header-welcome-text" class="header-user-badge" onclick="openWelcomeNameModal()">{welcome_line} <span style="font-size:0.72rem; opacity:0.85; text-decoration:underline;">✎ Name</span></p>
+    </div>
+    <button type="button" class="track-btn" onclick="callWaiter()">🔔 Call waiter</button>
+    <button type="button" class="track-btn" id="bill-btn" style="display:none;" onclick="toggleOverlay('bill-overlay', true)">
+      🧾 Bill
+      <span class="track-btn__dot"></span>
+    </button>
+    <button type="button" class="track-btn" id="track-btn" onclick="toggleOverlay('track-overlay', true)">
+      Track order
+      <span class="track-btn__dot"></span>
+    </button>
+  </header>
+
+  <div class="layout">
+    <nav class="sidebar">{"".join(sidebar_html)}</nav>
+    <main>
+      {"".join(sections_html) if sections_html else '<p>No menu items available right now.</p>'}
+    </main>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <div class="overlay overlay--center overlay--top" id="action-card-overlay">
+    <div class="action-card">
+      <div class="action-card__icon" id="action-card-icon">🔔</div>
+      <h2 id="action-card-title"></h2>
+      <p id="action-card-message"></p>
+      <button type="button" class="btn-confirm" onclick="dismissActionCard()">Got it</button>
+    </div>
+  </div>
+
+  <div class="overlay overlay--center overlay--payment" id="upi-overlay" onclick="if(event.target===this) toggleOverlay('upi-overlay', false)">
+    <div class="payment-card" onclick="event.stopPropagation()">
+      <h2>Scan to pay</h2>
+      <div class="amount" id="upi-amount"></div>
+      <div id="upi-qr-holder"></div>
+      <p class="demo-note" style="margin-bottom:16px;">Scan with any UPI app — GPay, PhonePe, Paytm, etc.</p>
+      <button type="button" class="btn-confirm" onclick="confirmUpiPaid()">I've completed the payment</button>
+      <button type="button" class="btn btn-ghost" style="margin-top:8px;" onclick="toggleOverlay('upi-overlay', false)">Cancel</button>
+    </div>
+  </div>
+
+  <div class="overlay overlay--center overlay--payment" id="card-overlay" onclick="if(event.target===this) toggleOverlay('card-overlay', false)">
+    <div class="payment-card" onclick="event.stopPropagation()">
+      <h2>Pay by card</h2>
+      <div class="amount" id="card-amount"></div>
+      <input class="pay-field" placeholder="Card number" maxlength="19" value="4242 4242 4242 4242" />
+      <div class="pay-row">
+        <input class="pay-field" placeholder="MM/YY" maxlength="5" value="12/28" />
+        <input class="pay-field" placeholder="CVC" maxlength="3" value="123" />
+      </div>
+      <button type="button" class="btn-confirm" onclick="confirmCardPaid()">Pay now</button>
+      <button type="button" class="btn btn-ghost" style="margin-top:8px;" onclick="toggleOverlay('card-overlay', false)">Cancel</button>
+      <p class="demo-note">Demo mode — no real card is charged.</p>
+    </div>
+  </div>
+
+  <div class="overlay" id="bill-overlay" onclick="if(event.target===this) toggleOverlay('bill-overlay', false)">
+    <div class="sheet">
+      <div class="sheet__header">
+        <h2>Your bill</h2>
+        <button type="button" class="sheet__close" onclick="toggleOverlay('bill-overlay', false)">✕</button>
+      </div>
+      <div id="bill-detail"></div>
+    </div>
+  </div>
+
+  <button type="button" class="cart-bar" id="cart-bar" onclick="toggleOverlay('cart-overlay', true)">
+    <span class="cart-bar__left" id="cart-bar-count">0 items</span>
+    <span class="cart-bar__right" id="cart-bar-total">₹0.00 · Review order</span>
+  </button>
+
+  <div class="overlay" id="cart-overlay" onclick="if(event.target===this) toggleOverlay('cart-overlay', false)">
+    <div class="sheet">
+      <div class="sheet__header">
+        <h2>Review your order</h2>
+        <button type="button" class="sheet__close" onclick="toggleOverlay('cart-overlay', false)">✕</button>
+      </div>
+      <div id="review-lines"></div>
+      <div class="order-overall-notes-box">
+        <label for="overall-order-notes" style="display:block;font-size:0.8rem;font-weight:700;color:var(--green);margin-bottom:6px;">
+          👨‍🍳 Special Instructions for Chef / Kitchen (Table Note)
+        </label>
+        <textarea id="overall-order-notes" rows="2" class="item-custom-note-input" style="width:100%;resize:none;font-size:0.82rem;" placeholder="e.g. Bring extra plates, serve appetizers first, please cook food less spicy..."></textarea>
+      </div>
+      <div class="review-total"><span>Total</span><span id="review-total">₹0.00</span></div>
+      <button type="button" id="confirm-order" class="btn-confirm" onclick="placeOrder()">Place Order</button>
+    </div>
+  </div>
+
+  <div class="overlay" id="track-overlay" onclick="if(event.target===this) toggleOverlay('track-overlay', false)">
+    <div class="sheet">
+      <div class="sheet__header">
+        <h2>Your order status</h2>
+        <button type="button" class="sheet__close" onclick="toggleOverlay('track-overlay', false)">✕</button>
+      </div>
+      <div id="order-status-panel"><p class="empty-note">No orders placed yet.</p></div>
+      <button type="button" id="request-bill-btn" class="btn-confirm" style="display:none;" onclick="toggleOverlay('confirm-bill-overlay', true)">
+        Request the bill
+      </button>
+    </div>
+  </div>
+
+  <div class="overlay overlay--center" id="welcome-name-overlay" style="display:none;" onclick="if(event.target===this) closeWelcomeNameModal()">
+    <div class="welcome-card" onclick="event.stopPropagation()">
+      <div style="font-size:2.4rem; margin-bottom:8px;">🍽️</div>
+      <h2 style="margin:0 0 6px; font-family:'Fraunces',serif; font-size:1.35rem; color:var(--green);">Welcome to {html.escape(restaurant_name)}!</h2>
+      <p style="margin:0 0 16px; font-size:0.85rem; color:var(--muted); line-height:1.4;">
+        Table <strong>#{html.escape(table.number)}</strong> · Please enter your name so our staff and kitchen know who is ordering.
+      </p>
+      <form id="welcome-name-form" onsubmit="submitGuestName(event)">
+        <div style="text-align:left; margin-bottom:14px;">
+          <label style="display:block; font-size:0.78rem; font-weight:700; color:var(--ink); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.04em;">Your Name *</label>
+          <input type="text" id="welcome-guest-name-input" required class="input" placeholder="e.g. Alex, Priya, John"
+                 style="width:100%; padding:12px 14px; border-radius:10px; border:1.5px solid var(--line); font-size:1rem; font-family:inherit; outline:none; box-sizing:border-box;" />
+        </div>
+        <div style="text-align:left; margin-bottom:18px;">
+          <label style="display:block; font-size:0.78rem; font-weight:700; color:var(--ink); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.04em;">Number of Guests (Party Size)</label>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <input type="number" id="welcome-party-size-input" min="1" max="25" value="2"
+                   style="width:70px; padding:10px; border-radius:10px; border:1.5px solid var(--line); font-size:1rem; text-align:center; font-weight:700; box-sizing:border-box;" />
+            <div style="display:flex; gap:6px; flex:1;">
+              <button type="button" class="btn-party-pill" onclick="setWelcomeParty(1)">1</button>
+              <button type="button" class="btn-party-pill is-selected" onclick="setWelcomeParty(2)">2</button>
+              <button type="button" class="btn-party-pill" onclick="setWelcomeParty(4)">4</button>
+              <button type="button" class="btn-party-pill" onclick="setWelcomeParty(6)">6+</button>
+            </div>
+          </div>
+        </div>
+        <button type="submit" id="btn-submit-guest-name" class="btn-confirm" style="width:100%; padding:13px; font-size:0.98rem; font-weight:700; border-radius:12px; background:var(--green); color:#fff; border:none; cursor:pointer;">
+          Start Dining & View Menu →
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <div class="overlay" id="confirm-bill-overlay" onclick="if(event.target===this) toggleOverlay('confirm-bill-overlay', false)">
+    <div class="sheet">
+      <h2 style="margin:0 0 8px;font-size:1.1rem;">Ready for the bill?</h2>
+      <p class="empty-note" style="padding:0 0 16px;text-align:left;">
+        You won't be able to order anything else after this. If you'd like something more, order it first.
+      </p>
+      <div style="display:flex;gap:8px;">
+        <button type="button" class="btn-confirm" style="background:#94a3b8;" onclick="toggleOverlay('confirm-bill-overlay', false)">Not yet</button>
+        <button type="button" class="btn-confirm" onclick="confirmRequestBill()">Yes, get my bill</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const CONFIG = {menu_json};
+    const API_BASE = window.location.origin;
+    const CART_KEY = 'foh_cart_' + CONFIG.tableId;
+    let cart = {{}};
+    try {{
+      const saved = localStorage.getItem(CART_KEY);
+      if (saved) cart = JSON.parse(saved);
+    }} catch (e) {{ cart = {{}}; }}
+
+    function openWelcomeNameModal() {{
+      const overlay = document.getElementById('welcome-name-overlay');
+      if (overlay) {{
+        overlay.style.display = 'flex';
+        overlay.classList.add('is-open');
+        const inp = document.getElementById('welcome-guest-name-input');
+        const saved = localStorage.getItem('foh_guest_name_' + CONFIG.tableId) || (CONFIG.guestName && !CONFIG.guestName.startsWith('Guest Table') ? CONFIG.guestName : '');
+        if (inp) {{
+          inp.value = saved;
+          setTimeout(() => inp.focus(), 150);
+        }}
+      }}
+    }}
+
+    function closeWelcomeNameModal() {{
+      const overlay = document.getElementById('welcome-name-overlay');
+      if (overlay) {{
+        overlay.classList.remove('is-open');
+        overlay.style.display = 'none';
+      }}
+    }}
+
+    function checkGuestIdentification() {{
+      const savedName = localStorage.getItem('foh_guest_name_' + CONFIG.tableId);
+      const currentName = CONFIG.guestName;
+      const isGeneric = !currentName || currentName.startsWith('Guest Table') || currentName.trim() === '';
+
+      if (savedName && savedName.trim()) {{
+        updateWelcomeHeader(savedName);
+      }} else if (isGeneric) {{
+        openWelcomeNameModal();
+      }} else {{
+        updateWelcomeHeader(currentName);
+      }}
+    }}
+
+    function setWelcomeParty(num) {{
+      const inp = document.getElementById('welcome-party-size-input');
+      if (inp) inp.value = num;
+      document.querySelectorAll('.btn-party-pill').forEach(b => {{
+        b.classList.toggle('is-selected', b.textContent === String(num) || (num >= 6 && b.textContent === '6+'));
+      }});
+    }}
+
+    async function submitGuestName(e) {{
+      e.preventDefault();
+      const nameInp = document.getElementById('welcome-guest-name-input');
+      const partyInp = document.getElementById('welcome-party-size-input');
+      const name = (nameInp ? nameInp.value : '').trim();
+      const partySize = parseInt(partyInp ? partyInp.value : '2', 10) || 2;
+      if (!name) {{
+        showToast('Please enter your name', true);
+        return;
+      }}
+
+      const btn = document.getElementById('btn-submit-guest-name');
+      if (btn) {{ btn.disabled = true; btn.textContent = 'Saving...'; }}
+
+      try {{
+        localStorage.setItem('foh_guest_name_' + CONFIG.tableId, name);
+        CONFIG.guestName = name;
+        updateWelcomeHeader(name);
+
+        await fetch(API_BASE + '/guest/identify', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ token: CONFIG.token, guestName: name, partySize: partySize }}),
+        }});
+
+        closeWelcomeNameModal();
+        showToast('Welcome, ' + name + '! Explore our menu below.');
+      }} catch (err) {{
+        closeWelcomeNameModal();
+      }} finally {{
+        if (btn) {{ btn.disabled = false; btn.textContent = 'Start Dining & View Menu →'; }}
+      }}
+    }}
+
+    function updateWelcomeHeader(name) {{
+      const el = document.getElementById('header-welcome-text');
+      if (el) {{
+        el.innerHTML = 'Welcome, <strong style="color:var(--gold);">' + name + '</strong> · Table ' + CONFIG.tableNumber + ' <span style="font-size:0.72rem; opacity:0.85; text-decoration:underline;">✎ Name</span>';
+      }}
+    }}
+
+    function saveCart() {{
+      try {{ localStorage.setItem(CART_KEY, JSON.stringify(cart)); }} catch (e) {{ /* ignore */ }}
+    }}
+    const STEPS = ['PENDING', 'APPROVED', 'PREPARING', 'READY'];
+    const STEP_LABELS = {{ PENDING: 'Waiting for approval', APPROVED: 'Approved', PREPARING: 'Preparing', READY: 'Ready to serve' }};
+    const CATEGORY_ICONS = {{ Starters: '🥗', Mains: '🍛', Drinks: '🍹', Desserts: '🍰' }};
+    let hasExistingBill = false;
+    let waiterCallAcknowledged = false;
+
+    function showToast(msg, isError) {{
+      const el = document.getElementById('toast');
+      el.textContent = msg;
+      el.className = 'toast' + (isError ? ' error' : '');
+      el.style.display = 'block';
+      setTimeout(() => {{ el.style.display = 'none'; }}, 3000);
+    }}
+
+    function selectCategory(id) {{
+      document.querySelectorAll('.side-tab').forEach(t => t.classList.toggle('is-active', t.dataset.cat === id));
+      document.querySelectorAll('.category').forEach(c => c.classList.toggle('is-active', c.id === id));
+    }}
+
+    function toggleOverlay(id, open) {{
+      document.getElementById(id).classList.toggle('is-open', open);
+    }}
+
+    function handleNoteInputChange(id, val) {{
+      const btn = document.getElementById('btn-save-note-' + id);
+      if (btn) {{
+        if (val.trim()) {{
+          btn.textContent = 'Add Note ↵';
+          btn.classList.remove('is-saved');
+        }} else {{
+          btn.textContent = 'Add Note ↵';
+          btn.classList.remove('is-saved');
+        }}
+      }}
+    }}
+
+    function handleNoteKeyDown(e, id) {{
+      if (e.key === 'Enter') {{
+        e.preventDefault();
+        confirmItemNote(id);
+      }}
+    }}
+
+    function confirmItemNote(id) {{
+      const inp = document.getElementById('note-' + id);
+      const val = (inp ? inp.value : '').trim();
+      const badge = document.getElementById('note-badge-' + id);
+      const badgeText = document.getElementById('note-badge-text-' + id);
+      const btn = document.getElementById('btn-save-note-' + id);
+
+      // Auto-increment quantity to 1 if not yet added
+      if (!cart[id] || cart[id].qty === 0) {{
+        changeQty(id, 1);
+      }}
+
+      updateItemNote(id, val);
+
+      if (val) {{
+        if (badge && badgeText) {{
+          badgeText.textContent = val;
+          badge.style.display = 'flex';
+        }}
+        if (btn) {{
+          btn.textContent = '✓ Saved';
+          btn.classList.add('is-saved');
+        }}
+        showToast('✓ Note saved: "' + val + '" will be sent to Chef!');
+      }} else {{
+        if (badge) badge.style.display = 'none';
+        if (btn) {{
+          btn.textContent = 'Add Note ↵';
+          btn.classList.remove('is-saved');
+        }}
+      }}
+    }}
+
+    function quickApplyNote(id, noteText) {{
+      const inp = document.getElementById('note-' + id);
+      if (inp) {{
+        inp.value = noteText;
+        confirmItemNote(id);
+        inp.focus();
+      }}
+    }}
+
+    function clearItemNote(id) {{
+      const inp = document.getElementById('note-' + id);
+      if (inp) inp.value = '';
+      const badge = document.getElementById('note-badge-' + id);
+      if (badge) badge.style.display = 'none';
+      const btn = document.getElementById('btn-save-note-' + id);
+      if (btn) {{
+        btn.textContent = 'Add Note ↵';
+        btn.classList.remove('is-saved');
+      }}
+      updateItemNote(id, '');
+      showToast('Note removed');
+    }}
+
+    function updateItemNote(id, val) {{
+      if (!cart[id]) {{
+        const row = document.querySelector('.menu-item[data-id="' + id + '"]');
+        if (!row) return;
+        cart[id] = {{ id, name: row.dataset.name, price: parseFloat(row.dataset.price), qty: 1, notes: '' }};
+      }}
+      cart[id].notes = val;
+      saveCart();
+      const rowInput = document.getElementById('note-' + id);
+      if (rowInput && rowInput.value !== val) rowInput.value = val;
+      renderCartBar();
+    }}
+
+    function changeQty(id, delta) {{
+      const row = document.querySelector('.menu-item[data-id="' + id + '"]');
+      if (!row) return;
+      const name = row.dataset.name;
+      const price = parseFloat(row.dataset.price);
+      if (!cart[id]) cart[id] = {{ id, name, price, qty: 0, notes: '' }};
+      cart[id].qty = Math.max(0, cart[id].qty + delta);
+      const qtyEl = document.getElementById('qty-' + id);
+      if (qtyEl) qtyEl.textContent = cart[id].qty;
+      const addBtn = document.getElementById('add-btn-' + id);
+      const stepper = document.getElementById('stepper-' + id);
+      const wrap = document.getElementById('note-wrap-' + id);
+      if (cart[id].qty > 0) {{
+        if (addBtn) addBtn.style.display = 'none';
+        if (stepper) stepper.style.display = 'flex';
+        if (wrap) wrap.classList.add('is-visible');
+        if (cart[id].notes) {{
+          const inp = document.getElementById('note-' + id);
+          if (inp && !inp.value) inp.value = cart[id].notes;
+          const badge = document.getElementById('note-badge-' + id);
+          const badgeText = document.getElementById('note-badge-text-' + id);
+          if (badge && badgeText) {{
+            badgeText.textContent = cart[id].notes;
+            badge.style.display = 'flex';
+          }}
+          const btn = document.getElementById('btn-save-note-' + id);
+          if (btn) {{
+            btn.textContent = '✓ Saved';
+            btn.classList.add('is-saved');
+          }}
+        }}
+      }} else {{
+        if (addBtn) addBtn.style.display = 'inline-block';
+        if (stepper) stepper.style.display = 'none';
+        if (wrap) wrap.classList.remove('is-visible');
+      }}
+      renderCartBar();
+      saveCart();
+    }}
+
+    function handleItemCardClick(e, id) {{
+      if (e.target.closest('.stepper-wrap') || e.target.closest('.item-custom-note-wrap')) return;
+      if (!cart[id] || cart[id].qty === 0) {{
+        changeQty(id, 1);
+        const noteInput = document.getElementById('note-' + id);
+        if (noteInput) setTimeout(() => noteInput.focus(), 150);
+      }}
+    }}
+
+    function cartEntries() {{
+      return Object.values(cart).filter(i => i.qty > 0);
+    }}
+
+    function renderCartBar() {{
+      const entries = cartEntries();
+      const bar = document.getElementById('cart-bar');
+      const count = entries.reduce((sum, i) => sum + i.qty, 0);
+      const total = entries.reduce((sum, i) => sum + i.price * i.qty, 0);
+      bar.classList.toggle('is-visible', count > 0);
+      document.getElementById('cart-bar-count').textContent = count + (count === 1 ? ' item' : ' items');
+      document.getElementById('cart-bar-total').textContent = '₹' + total.toFixed(2) + ' · Review order';
+      renderReviewSheet();
+    }}
+
+    function renderReviewSheet() {{
+      const entries = cartEntries();
+      const linesEl = document.getElementById('review-lines');
+      const totalEl = document.getElementById('review-total');
+      const btn = document.getElementById('confirm-order');
+      if (!entries.length) {{
+        linesEl.innerHTML = '<p class="empty-note">Your cart is empty.</p>';
+        totalEl.textContent = '₹0.00';
+        btn.disabled = true;
+        return;
+      }}
+      let total = 0;
+      linesEl.innerHTML = entries.map(i => {{
+        total += i.price * i.qty;
+        const noteVal = (i.notes || '').replace(/"/g, '&quot;');
+        return '<div class="review-line">'
+          + '<div style="flex:1;min-width:0;">'
+          + '<div class="review-line__name">' + i.qty + '× ' + i.name + '</div>'
+          + '<div class="review-line__price">₹' + i.price.toFixed(2) + ' each</div>'
+          + (i.notes ? '<div class="review-chef-note">👨‍🍳 <span>Note for Chef: <strong>' + noteVal + '</strong></span></div>' : '')
+          + '<div style="margin-top:6px;display:flex;gap:6px;align-items:center;">'
+          + '<input type="text" class="item-custom-note-input" style="font-size:0.78rem;" '
+          + 'placeholder="✎ Edit note for Chef..." '
+          + 'value="' + noteVal + '" '
+          + 'data-item-id="' + i.id + '" '
+          + 'oninput="updateItemNote(this.dataset.itemId, this.value)" />'
+          + '</div>'
+          + '</div>'
+          + '<div class="review-line__price" style="font-weight:700;font-size:0.92rem;flex-shrink:0;">₹' + (i.price * i.qty).toFixed(2) + '</div>'
+          + '</div>';
+      }}).join('');
+      totalEl.textContent = '₹' + total.toFixed(2);
+      btn.disabled = false;
+    }}
+
+    function statusIndex(order) {{
+      if (order.approvalStatus === 'REJECTED') return -1;
+      if (order.approvalStatus === 'PENDING') return 0;
+      if (order.status === 'READY' || order.status === 'SERVED') return 3;
+      if (order.status === 'PREPARING') return 2;
+      return 1;
+    }}
+
+    function renderOrderStatuses(orders) {{
+      const panel = document.getElementById('order-status-panel');
+      const trackBtn = document.getElementById('track-btn');
+      if (!orders.length) {{
+        panel.innerHTML = '<p class="empty-note">No orders placed yet.</p>';
+        trackBtn.classList.remove('has-active');
+        return;
+      }}
+      const hasActive = orders.some(o => o.approvalStatus !== 'REJECTED' && o.status !== 'SERVED');
+      trackBtn.classList.toggle('has-active', hasActive);
+      const requestBtn = document.getElementById('request-bill-btn');
+      const approvedOrders = orders.filter(o => o.approvalStatus === 'APPROVED' || o.approvalStatus === 'PENDING');
+      requestBtn.style.display = (approvedOrders.length > 0 && !hasExistingBill) ? 'block' : 'none';
+      panel.innerHTML = orders.map(order => {{
+        const itemsText = order.items.map(i => i.quantity + '× ' + i.itemName + (i.notes ? ' (' + i.notes + ')' : '')).join(', ');
+        if (order.approvalStatus === 'REJECTED') {{
+          const reason = order.notes ? ': ' + order.notes : '';
+          return '<div class="status-tracker rejected">'
+            + '<div class="status-tracker__items">' + itemsText + '</div>'
+            + '<div class="status-step is-current" style="align-items:flex-start"><span class="status-step__dot">✕</span>'
+            + '<span class="status-step__label" style="color:var(--red);font-weight:700;">Order declined by staff' + reason + '</span></div></div>';
+        }}
+        const idx = statusIndex(order);
+        const steps = STEPS.map((s, i) => {{
+          const cls = i < idx ? 'is-done' : i === idx ? 'is-current' : '';
+          return '<div class="status-step ' + cls + '">'
+            + '<span class="status-step__line"></span>'
+            + '<span class="status-step__dot">' + (i < idx ? '✓' : '') + '</span>'
+            + '<span class="status-step__label">' + STEP_LABELS[s] + '</span>'
+            + '</div>';
+        }}).join('');
+        return '<div class="status-tracker">'
+          + '<div class="status-tracker__items">' + itemsText + '</div>'
+          + (order.notes ? '<div style="font-size:0.78rem;color:#b45309;background:#fffbeb;padding:4px 8px;border-radius:6px;margin-bottom:6px;border:1px solid #fde68a;">📝 Table Note: ' + order.notes + '</div>' : '')
+          + '<div class="status-steps">' + steps + '</div></div>';
+      }}).join('');
+    }}
+
+    const knownRejectedOrders = new Set();
+    async function pollOrderStatus() {{
+      try {{
+        const res = await fetch(API_BASE + '/guest/orders?token=' + encodeURIComponent(CONFIG.token));
+        if (!res.ok) return;
+        const orders = await res.json();
+        orders.sort((a, b) => new Date(b.placedAt) - new Date(a.placedAt));
+        orders.forEach(o => {{
+          if (o.approvalStatus === 'REJECTED' && !knownRejectedOrders.has(o.id)) {{
+            knownRejectedOrders.add(o.id);
+            showToast('⚠️ Your order was rejected by staff', true);
+            showActionCard('✕', 'Order Declined', 'Your order was declined by restaurant staff' + (o.notes ? ': ' + o.notes : '. Please call a waiter for help.'));
+          }}
+        }});
+        renderOrderStatuses(orders);
+      }} catch (e) {{ /* try again next poll */ }}
+    }}
+
+    async function placeOrder() {{
+      const entries = cartEntries();
+      if (!entries.length) return;
+      const btn = document.getElementById('confirm-order');
+      btn.disabled = true;
+      btn.textContent = 'Sending to Kitchen…';
+      const overallNotes = (document.getElementById('overall-order-notes') ? document.getElementById('overall-order-notes').value : '').trim() || null;
+      try {{
+        const res = await fetch(API_BASE + '/orders?token=' + encodeURIComponent(CONFIG.token), {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{
+            tableId: CONFIG.tableId,
+            notes: overallNotes,
+            items: entries.map(i => ({{
+              menuItemId: i.id,
+              quantity: i.qty,
+              notes: (i.notes || '').trim() || null,
+            }})),
+          }}),
+        }});
+        if (!res.ok) {{
+          const err = await res.json().catch(() => ({{}}));
+          throw new Error(err.detail || res.statusText);
+        }}
+        Object.keys(cart).forEach(k => {{
+          cart[k].qty = 0;
+          cart[k].notes = '';
+          const el = document.getElementById('qty-' + k);
+          if (el) el.textContent = '0';
+          const badge = document.getElementById('note-badge-' + k);
+          if (badge) badge.style.display = 'none';
+          const inp = document.getElementById('note-' + k);
+          if (inp) inp.value = '';
+          const btnSave = document.getElementById('btn-save-note-' + k);
+          if (btnSave) {{ btnSave.textContent = 'Add Note ↵'; btnSave.classList.remove('is-saved'); }}
+        }});
+        const overallInp = document.getElementById('overall-order-notes');
+        if (overallInp) overallInp.value = '';
+        renderCartBar();
+        saveCart();
+        toggleOverlay('cart-overlay', false);
+        showToast('✓ Order placed! Sent to Kitchen & Chef with your notes.');
+        pollOrderStatus();
+      }} catch (e) {{
+        showToast(e.message || 'Could not place order', true);
+        toggleOverlay('cart-overlay', false);
+      }} finally {{
+        btn.textContent = 'Place Order';
+      }}
+    }}
+
+    let wasOrderingLocked = false;
+
+    function markSeen(key) {{ try {{ localStorage.setItem(key, '1'); }} catch (e) {{}} }}
+    function hasSeen(key) {{ try {{ return !!localStorage.getItem(key); }} catch (e) {{ return false; }} }}
+
+    function showActionCard(icon, title, message) {{
+      const payload = {{ icon, title, message }};
+      try {{ localStorage.setItem('foh_pending_card', JSON.stringify(payload)); }} catch (e) {{}}
+      document.getElementById('action-card-icon').textContent = icon;
+      document.getElementById('action-card-title').textContent = title;
+      document.getElementById('action-card-message').textContent = message;
+      toggleOverlay('action-card-overlay', true);
+    }}
+
+    function dismissActionCard() {{
+      try {{ localStorage.removeItem('foh_pending_card'); }} catch (e) {{}}
+      toggleOverlay('action-card-overlay', false);
+    }}
+
+    function restorePendingCard() {{
+      try {{
+        const saved = localStorage.getItem('foh_pending_card');
+        if (!saved) return;
+        const {{ icon, title, message }} = JSON.parse(saved);
+        document.getElementById('action-card-icon').textContent = icon;
+        document.getElementById('action-card-title').textContent = title;
+        document.getElementById('action-card-message').textContent = message;
+        toggleOverlay('action-card-overlay', true);
+      }} catch (e) {{}}
+    }}
+
+    function setOrderingLocked(locked) {{
+      document.body.classList.toggle('ordering-locked', locked);
+      const bar = document.getElementById('cart-bar');
+      if (bar) bar.style.display = locked ? 'none' : '';
+      if (locked) {{
+        Object.keys(cart).forEach(k => {{ cart[k].qty = 0; const el = document.getElementById('qty-' + k); if (el) el.textContent = '0'; }});
+        renderCartBar();
+        saveCart();
+      }}
+      if (locked && !wasOrderingLocked) {{
+        const key = 'foh_seen_locked_' + (CONFIG.sessionId || CONFIG.token);
+        if (!hasSeen(key)) {{
+          markSeen(key);
+          showActionCard('✓', 'Bill paid', 'Thank you! We hope to see you again soon.');
+        }}
+      }}
+      wasOrderingLocked = locked;
+    }}
+
+    function renderBill(bill) {{
+      hasExistingBill = !!bill;
+      const isPaid = bill ? bill.status === 'PAID' : false;
+      setOrderingLocked(isPaid);
+      const billBtn = document.getElementById('bill-btn');
+      if (!bill) {{ billBtn.style.display = 'none'; return; }}
+      billBtn.style.display = 'inline-flex';
+      billBtn.classList.toggle('has-active', !isPaid);
+
+      const seenKey = 'foh_seen_bill_' + bill.id + '_' + bill.status;
+      if (!hasSeen(seenKey)) {{
+        markSeen(seenKey);
+        if (isPaid) {{
+          showActionCard('✓', 'Bill paid', 'Thank you! We hope to see you again soon.');
+        }} else {{
+          showActionCard('🧾', 'Your bill is ready', '₹' + bill.total.toFixed(2) + ' — tap the Bill button anytime to view or pay.');
+        }}
+      }}
+
+      const groups = {{}};
+      bill.items.forEach(i => {{
+        if (!groups[i.category]) groups[i.category] = [];
+        groups[i.category].push(i);
+      }});
+      const catOrder = ['North Indian', 'South Indian', 'Chinese & Pan-Asian', 'Italian & Continental', 'Desserts', 'Liquor & Cocktails', 'Starters', 'Mains', 'Drinks'];
+      const cats = catOrder.filter(c => groups[c]).concat(Object.keys(groups).filter(c => !catOrder.includes(c)));
+      const rows = cats.map(cat => {{
+        const items = groups[cat].map(i =>
+          '<div class="review-line"><span>' + i.quantity + '× ' + i.itemName + '</span><span>₹' + i.lineTotal.toFixed(2) + '</span></div>'
+        ).join('');
+        return '<div style="font-weight:700;font-size:0.85rem;color:#475569;margin:10px 0 4px;">'
+          + (CATEGORY_ICONS[cat] || '•') + ' ' + cat.toUpperCase() + '</div>' + items;
+      }}).join('');
+
+      const statusLine = isPaid
+        ? '✓ PAID' + (bill.paymentMethod ? ' · via ' + bill.paymentMethod : '')
+        : '⏳ AWAITING PAYMENT';
+
+      const payBlock = isPaid ? '' : `
+        <div style="border-top:1px dashed var(--line);margin-top:14px;padding-top:14px;">
+          <h3 style="margin:0 0 12px;font-size:0.95rem;">Choose a payment method</h3>
+          <div class="pay-method-grid">
+            <button type="button" class="pay-method-btn" onclick="showUpiPayment(${{bill.total}})">
+              <span class="pay-method-btn__icon">📱</span>
+              <span class="pay-method-btn__text">
+                <div class="pay-method-btn__title">UPI</div>
+                <div class="pay-method-btn__sub">GPay, PhonePe, Paytm & more</div>
+              </span>
+              <span class="pay-method-btn__chevron">›</span>
+            </button>
+            <button type="button" class="pay-method-btn" onclick="showCardPayment(${{bill.total}})">
+              <span class="pay-method-btn__icon">💳</span>
+              <span class="pay-method-btn__text">
+                <div class="pay-method-btn__title">Card</div>
+                <div class="pay-method-btn__sub">Debit or credit card</div>
+              </span>
+              <span class="pay-method-btn__chevron">›</span>
+            </button>
+            <button type="button" class="pay-method-btn" onclick="requestCashPayment()">
+              <span class="pay-method-btn__icon">💵</span>
+              <span class="pay-method-btn__text">
+                <div class="pay-method-btn__title">Cash</div>
+                <div class="pay-method-btn__sub">Pay your waiter directly</div>
+              </span>
+              <span class="pay-method-btn__chevron">›</span>
+            </button>
+          </div>
+        </div>
+      `;
+
+      document.getElementById('bill-detail').innerHTML = rows
+        + '<div class="review-total"><span>Total</span><span>₹' + bill.total.toFixed(2) + '</span></div>'
+        + '<div style="text-align:center;margin-top:12px;font-weight:700;color:' + (isPaid ? '#0f766e' : '#b45309') + ';">'
+        + statusLine + '</div>'
+        + payBlock;
+    }}
+
+    async function showUpiPayment(amount) {{
+      toggleOverlay('card-overlay', false);
+      toggleOverlay('upi-overlay', true);
+      document.getElementById('upi-amount').textContent = '₹' + amount.toFixed(2);
+      const holder = document.getElementById('upi-qr-holder');
+      holder.innerHTML = '<p class="demo-note">Loading QR…</p>';
+      try {{
+        const res = await fetch(API_BASE + '/guest/upi-qr?token=' + encodeURIComponent(CONFIG.token));
+        const data = await res.json();
+        const qrImg = 'https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=' + encodeURIComponent(data.upiLink);
+        holder.innerHTML = '<img src="' + qrImg + '" alt="UPI QR" width="220" height="220" />';
+      }} catch (e) {{
+        holder.innerHTML = '<p class="demo-note">Could not load QR code.</p>';
+      }}
+    }}
+
+    async function confirmUpiPaid() {{
+      try {{
+        const res = await fetch(API_BASE + '/guest/pay-upi?token=' + encodeURIComponent(CONFIG.token), {{ method: 'POST' }});
+        if (!res.ok) throw new Error();
+        toggleOverlay('upi-overlay', false);
+        pollBillStatus();
+      }} catch (e) {{
+        showActionCard('⚠️', 'Payment not confirmed', 'Please try again or ask your waiter for help.');
+      }}
+    }}
+
+    function showCardPayment(amount) {{
+      toggleOverlay('upi-overlay', false);
+      toggleOverlay('card-overlay', true);
+      document.getElementById('card-amount').textContent = '₹' + amount.toFixed(2);
+    }}
+
+    async function confirmCardPaid() {{
+      try {{
+        const res = await fetch(API_BASE + '/guest/pay-card?token=' + encodeURIComponent(CONFIG.token), {{ method: 'POST' }});
+        if (!res.ok) throw new Error();
+        toggleOverlay('card-overlay', false);
+        pollBillStatus();
+      }} catch (e) {{
+        showActionCard('⚠️', 'Payment failed', 'Please try again.');
+      }}
+    }}
+
+    async function requestCashPayment() {{
+      try {{
+        const statusRes = await fetch(API_BASE + '/guest/waiter-status?token=' + encodeURIComponent(CONFIG.token) + '&event_type=CASH_PAYMENT_REQUEST');
+        const status = statusRes.ok ? await statusRes.json() : null;
+        if (status) {{
+          showActionCard(
+            '💵',
+            'Already on the way',
+            status.acknowledged
+              ? 'Your waiter is coming to collect the cash payment now.'
+              : 'Your waiter has already been notified about your cash payment.'
+          );
+          return;
+        }}
+        await fetch(API_BASE + '/guest/request-cash-payment?token=' + encodeURIComponent(CONFIG.token), {{ method: 'POST' }});
+        showActionCard('💵', 'Waiter notified', 'They\\u2019ll come collect the cash payment shortly. Please have the amount ready.');
+      }} catch (e) {{
+        showActionCard('⚠️', 'Could not notify waiter', 'Please try again.');
+      }}
+    }}
+
+    async function confirmRequestBill() {{
+      try {{
+        const res = await fetch(API_BASE + '/guest/request-bill?token=' + encodeURIComponent(CONFIG.token), {{ method: 'POST' }});
+        if (!res.ok) throw new Error('Could not request bill');
+        toggleOverlay('confirm-bill-overlay', false);
+        toggleOverlay('track-overlay', false);
+        pollBillStatus();
+      }} catch (e) {{
+        showToast('Could not request bill', true);
+      }}
+    }}
+
+    async function callWaiter() {{
+      try {{
+        const statusRes = await fetch(API_BASE + '/guest/waiter-status?token=' + encodeURIComponent(CONFIG.token) + '&event_type=WAITER_CALL');
+        const status = statusRes.ok ? await statusRes.json() : null;
+        if (status) {{
+          showActionCard(
+            '🙏',
+            'We\\u2019ve got your request',
+            status.acknowledged
+              ? 'Your waiter is already on the way — thank you for your patience.'
+              : 'Your waiter has already been notified and will be with you shortly.'
+          );
+          return;
+        }}
+        await fetch(API_BASE + '/guest/call-waiter?token=' + encodeURIComponent(CONFIG.token), {{ method: 'POST' }});
+        showActionCard('🔔', 'Waiter notified', 'They will be with you shortly!');
+      }} catch (e) {{
+        showActionCard('⚠️', 'Could not reach the waiter', 'Please try calling again.');
+      }}
+    }}
+
+    async function pollWaiterStatus() {{
+      try {{
+        const res = await fetch(API_BASE + '/guest/waiter-status?token=' + encodeURIComponent(CONFIG.token));
+        if (!res.ok) return;
+        const status = await res.json();
+        if (!status) {{ waiterCallAcknowledged = false; return; }}
+        if (status.acknowledged && !waiterCallAcknowledged) {{
+          showToast('🏃 Waiter is on the way!');
+        }}
+        waiterCallAcknowledged = status.acknowledged;
+      }} catch (e) {{ /* try again next poll */ }}
+    }}
+
+    
+
+   
+   
+
+    async function pollBillStatus() {{
+      try {{
+        const res = await fetch(API_BASE + '/guest/bill?token=' + encodeURIComponent(CONFIG.token));
+        if (!res.ok) return;
+        const bill = await res.json();
+        renderBill(bill);
+      }} catch (e) {{ /* try again next poll */ }}
+    }}
+
+    
+
+    Object.values(cart).forEach(item => {{
+      const el = document.getElementById('qty-' + item.id);
+      if (el) el.textContent = item.qty;
+      const addBtn = document.getElementById('add-btn-' + item.id);
+      const stepper = document.getElementById('stepper-' + item.id);
+      const wrap = document.getElementById('note-wrap-' + item.id);
+      if (item.qty > 0) {{
+        if (addBtn) addBtn.style.display = 'none';
+        if (stepper) stepper.style.display = 'flex';
+        if (wrap) wrap.classList.add('is-visible');
+      }}
+      const noteInput = document.getElementById('note-' + item.id);
+      if (noteInput && item.notes) noteInput.value = item.notes;
+    }});
+    renderCartBar();
+
+    restorePendingCard();
+    pollOrderStatus();
+    pollBillStatus();
+    pollWaiterStatus();
+    checkGuestIdentification();
+    setInterval(pollOrderStatus, 4000);
+    setInterval(pollBillStatus, 4000);
+    setInterval(pollWaiterStatus, 4000);
+  </script>
+</body>
+</html>"""
+
+
+@router.get("/menu")
+def guest_menu(
+    token: str | None = Query(None),
+    table: str | None = Query(None, alias="table"),
+    table_number: str | None = Query(None, alias="tableNumber"),
+    table_id: str | None = Query(None, alias="tableId"),
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    raw_token = token if isinstance(token, str) else None
+    raw_table = table if isinstance(table, str) else None
+    raw_table_num = table_number if isinstance(table_number, str) else None
+    raw_table_id = table_id if isinstance(table_id, str) else None
+    identifier = raw_token or raw_table or raw_table_num or raw_table_id or ""
+    qr = _resolve_qr(db, identifier)
+    table_obj = db.get(Table, qr.table_id)
+    if not table_obj:
+        raise HTTPException(404, "Table not found")
+
+    try:
+        floor = get_current_floor(db)
+        restaurant_name = floor.name or RESTAURANT_NAME
+    except Exception:
+        restaurant_name = RESTAURANT_NAME
+
+    # Guarantee an active dining session for this table so guests can order right away
+    session = active_session_for_table(db, table_obj.id)
+    if not session:
+        from app.core.ids import new_id
+        session = DiningSession(
+            id=new_id(),
+            table_id=table_obj.id,
+            tenant_id=table_obj.tenant_id,
+            branch_id=table_obj.branch_id,
+            guest_name=f"Guest Table {table_obj.number}",
+            party_size=table_obj.capacity or 2,
+            status="ACTIVE",
+            seated_at=datetime.now(timezone.utc),
+        )
+        db.add(session)
+        table_obj.status = "ACTIVE"
+        db.commit()
+        db.refresh(session)
+
+    items = menu_service.list_available_models(db)
+    by_category: dict[str, list] = defaultdict(list)
+    for item in items:
+        by_category[item.category].append(item)
+
+    page = _build_guest_menu_html(
+        token=qr.token,
+        table=table_obj,
+        restaurant_name=restaurant_name,
+        items_by_category=dict(by_category),
+        guest_name=session.guest_name if session else None,
+        session_id=session.id if session else None,
+    )
+    return HTMLResponse(page)
+
+
+class GuestIdentifyPayload(CamelModel):
+    token: str
+    guest_name: str
+    party_size: int | None = None
+
+
+@router.post("/identify")
+@router.post("/session/guest-name")
+def update_guest_identification(
+    payload: GuestIdentifyPayload,
+    db: Session = Depends(get_db),
+):
+    qr = _resolve_qr(db, payload.token)
+    table = db.get(Table, qr.table_id)
+    if not table:
+        raise HTTPException(404, "Table not found")
+
+    session = active_session_for_table(db, table.id)
+    now = datetime.now(timezone.utc)
+    if not session:
+        from app.core.ids import new_id
+        session = DiningSession(
+            id=new_id(),
+            table_id=table.id,
+            tenant_id=getattr(table, "tenant_id", "org-demo"),
+            branch_id=getattr(table, "branch_id", None),
+            guest_name=payload.guest_name.strip(),
+            party_size=payload.party_size or table.capacity or 2,
+            status="ACTIVE",
+            seated_at=now,
+        )
+        db.add(session)
+    else:
+        session.guest_name = payload.guest_name.strip()
+        if payload.party_size and payload.party_size > 0:
+            session.party_size = payload.party_size
+
+    table.status = "ACTIVE"
+    db.commit()
+    db.refresh(session)
+
+    try:
+        from app.socket_manager import emit_sync
+        emit_sync(
+            "table_updated",
+            {"tableId": table.id, "status": "ACTIVE", "guestName": session.guest_name, "partySize": session.party_size},
+            room=table.tenant_id,
+        )
+    except Exception:
+        pass
+
+    return {
+        "success": True,
+        "guestName": session.guest_name,
+        "partySize": session.party_size,
+        "tableNumber": table.number,
+        "sessionId": session.id,
+    }
+
+
+@router.get("/orders")
+def guest_order_status(
+    token: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    qr = _resolve_qr(db, token)
+    session = active_session_for_table(db, qr.table_id)
+    if not session:
+        return []
+    orders = list_orders(db, session_id=session.id)
+    return [o.model_dump(by_alias=True) for o in orders]
+
+
+class GuestPayRequest(CamelModel):
+    token: str
+    split_count: int = 1
+    amount_paid: float = 0.0
+    tip: float = 0.0
+    payment_method: str = "CARD"  # APPLE_PAY, GOOGLE_PAY, CARD, UPI, CASH
+    guest_name: str | None = None
+
+
+@router.get("/bill")
+def get_guest_bill(
+    token: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    """Retrieve the live itemized bill, unpaid exposure, and payment status for this table."""
+    qr = _resolve_qr(db, token)
+    table = db.get(Table, qr.table_id)
+    if not table:
+        raise HTTPException(404, "Table not found")
+
+    session = active_session_for_table(db, table.id)
+    if not session:
+        session = (
+            db.query(DiningSession)
+            .filter(DiningSession.table_id == table.id)
+            .order_by(DiningSession.seated_at.desc())
+            .first()
+        )
+    if not session:
+        return {
+            "hasActiveSession": False,
+            "tableId": table.id,
+            "tableNumber": str(table.number),
+            "tableStatus": table.status,
+            "items": [],
+            "subtotal": 0.0,
+            "total": 0.0,
+            "isPaid": False,
+        }
+
+    bill = db.query(Bill).filter(Bill.session_id == session.id).first()
+
+    items_map: dict[str, dict] = {}
+    for order in session.orders or []:
+        for item in order.items or []:
+            unit_price = float(item.unit_price)
+            key = f"{item.item_name}-{unit_price:.2f}"
+            if key not in items_map:
+                items_map[key] = {
+                    "itemName": item.item_name,
+                    "name": item.item_name,
+                    "category": getattr(item, "category", None) or "Mains",
+                    "unitPrice": unit_price,
+                    "quantity": item.quantity,
+                    "lineTotal": round(unit_price * item.quantity, 2),
+                }
+            else:
+                items_map[key]["quantity"] += item.quantity
+                items_map[key]["lineTotal"] = round(
+                    unit_price * items_map[key]["quantity"], 2
+                )
+
+    item_list = list(items_map.values())
+    subtotal = round(sum(i["lineTotal"] for i in item_list), 2)
+    total = float(bill.total) if bill and bill.total is not None else subtotal
+    is_paid = bill.status == "PAID" if bill else False
+
+    return {
+        "id": bill.id if bill else f"bill-{session.id}",
+        "status": bill.status if bill else "OPEN",
+        "hasActiveSession": True,
+        "tableId": table.id,
+        "tableNumber": str(table.number),
+        "guestName": session.guest_name,
+        "items": item_list,
+        "subtotal": subtotal,
+        "total": total,
+        "isPaid": is_paid,
+        "tableStatus": table.status,
+        "billNumber": getattr(bill, "bill_number", f"T{table.number}") if bill else f"T{table.number}",
+    }
+
+
+guest_bill_status = get_guest_bill
+
+
+@router.post("/pay")
+def process_guest_payment(
+    payload: GuestPayRequest,
+    db: Session = Depends(get_db),
+):
+    """Guest 1-click Pay & Walk checkout via QR code / NFC."""
+    from app.core.ids import new_id
+    from app.models import Payment
+    from app.services.table_service import change_table_status
+
+    qr = _resolve_qr(db, payload.token)
+    table = db.get(Table, qr.table_id)
+    if not table:
+        raise HTTPException(404, "Table not found")
+
+    session = active_session_for_table(db, table.id)
+    if not session:
+        session = (
+            db.query(DiningSession)
+            .filter(DiningSession.table_id == table.id)
+            .order_by(DiningSession.seated_at.desc())
+            .first()
+        )
+    if not session:
+        raise HTTPException(400, "No active dining session found for this table")
+
+    now = datetime.now(timezone.utc)
+    bill = db.query(Bill).filter(Bill.session_id == session.id).first()
+    if not bill:
+        items = []
+        for o in session.orders or []:
+            items.extend(o.items or [])
+        subtotal = round(sum(float(i.unit_price) * i.quantity for i in items), 2)
+        bill = Bill(
+            id=new_id(),
+            tenant_id=getattr(table, "tenant_id", "org-demo"),
+            branch_id=getattr(table, "branch_id", None),
+            session_id=session.id,
+            subtotal=subtotal,
+            total=subtotal,
+            generated_at=now,
+            status="OPEN",
+        )
+        db.add(bill)
+        db.flush()
+
+    if bill.status == "PAID":
+        return {
+            "success": True,
+            "alreadyPaid": True,
+            "tableNumber": table.number,
+            "message": "Bill has already been paid in full.",
+        }
+
+    bill.status = "PAID"
+    bill.paid_at = now
+    session.status = "PAID"
+    session.payment_method = payload.payment_method
+    session.closed_at = now
+    table.walkout_alert_sent = False
+    table.departure_alert_sent = False
+
+    payment = Payment(
+        id=new_id(),
+        tenant_id=getattr(table, "tenant_id", "org-demo"),
+        branch_id=getattr(table, "branch_id", None),
+        bill_id=bill.id,
+        amount=payload.amount_paid or float(bill.total),
+        method=payload.payment_method,
+        payment_status="SUCCESS",
+        paid_at=now,
+        completed_at=now,
+    )
+    db.add(payment)
+
+    from app.models import AIEvent
+    from app.socket_manager import emit_sync
+
+    cash_events = db.query(AIEvent).filter(
+        AIEvent.table_id == table.id,
+        AIEvent.event_type == "CASH_PAYMENT_REQUEST",
+        AIEvent.resolved.is_(False),
+    ).all()
+    for ce in cash_events:
+        ce.resolved = True
+        ce.acknowledged = True
+    floor_id = str(table.floor_id) if table and table.floor_id else "floor-1"
+    emit_sync("cash_payment_resolved", {"tableId": table.id}, room=floor_id)
+
+    change_table_status(db, table.id, "CLEANING")
+    session.status = "PAID"
+    db.commit()
+
+    total_charged = round((payload.amount_paid or float(bill.total)) + (payload.tip or 0.0), 2)
+
+    return {
+        "success": True,
+        "alreadyPaid": False,
+        "tableNumber": table.number,
+        "amountPaid": payload.amount_paid or float(bill.total),
+        "tip": payload.tip or 0.0,
+        "totalCharged": total_charged,
+        "paymentMethod": payload.payment_method,
+        "message": "Payment successful. Thank you for dining with us!",
+    }
+
+
+def _billing_session(db: Session, table_id: str) -> DiningSession:
+    session = (
+        db.query(DiningSession)
+        .filter(DiningSession.table_id == table_id, DiningSession.status.in_(["BILLING"]))
+        .order_by(DiningSession.seated_at.desc())
+        .first()
+    )
+    if not session:
+        raise HTTPException(404, "No bill awaiting payment for this table")
+    return session
+
+
+@router.get("/upi-qr")
+def guest_upi_qr(
+    token: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    qr = _resolve_qr(db, token)
+    session = _billing_session(db, qr.table_id)
+    bill = get_bill(db, session.id)
+    upi_link = (
+        f"upi://pay?pa={quote(settings.restaurant_upi_id)}"
+        f"&pn={quote(settings.restaurant_upi_name)}"
+        f"&am={bill.total:.2f}&cu=INR&tn={quote('Table bill payment')}"
+    )
+    return {"upiLink": upi_link, "amount": bill.total}
+
+
+@router.post("/pay-upi")
+def guest_pay_upi(
+    token: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    qr = _resolve_qr(db, token)
+    session = _billing_session(db, qr.table_id)
+    bill = mark_paid(db, session.id, user_id=None, method="UPI")
+    return bill.model_dump(by_alias=True)
+
+
+@router.post("/pay-card")
+def guest_pay_card(
+    token: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    qr = _resolve_qr(db, token)
+    session = _billing_session(db, qr.table_id)
+    bill = mark_paid(db, session.id, user_id=None, method="CARD")
+    return bill.model_dump(by_alias=True)
+
+
+@router.post("/request-cash-payment")
+def guest_request_cash_payment(
+    token: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    from app.socket_manager import emit_sync
+
+    qr = _resolve_qr(db, token)
+    table = db.get(Table, qr.table_id)
+    session = _billing_session(db, qr.table_id)
+    bill = get_bill(db, session.id)
+    guest_name = session.guest_name if session.guest_name else "A guest"
+    msg = f"{guest_name} at Table {table.number} wants to pay ₹{bill.total:.2f} in cash"
+    ai_service.create_alert(
+        db,
+        AIEventCreate(
+            event_type="CASH_PAYMENT_REQUEST",
+            message=msg,
+            table_id=table.id,
+            target_role="WAITER",
+        ),
+    )
+    floor_id = str(table.floor_id) if table and table.floor_id else "floor-1"
+    emit_sync(
+        "cash_payment_requested",
+        {
+            "tableId": table.id,
+            "tableNumber": table.number,
+            "guestName": guest_name,
+            "amount": float(bill.total),
+            "message": msg,
+        },
+        room=floor_id,
+    )
+    return {"ok": True}
+
+
+@router.post("/acknowledge-cash-payment")
+def acknowledge_cash_payment(
+    table_id: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    from app.models import AIEvent
+    from app.socket_manager import emit_sync
+
+    table = db.get(Table, table_id)
+    events = (
+        db.query(AIEvent)
+        .filter(
+            AIEvent.table_id == table_id,
+            AIEvent.event_type == "CASH_PAYMENT_REQUEST",
+            AIEvent.resolved.is_(False),
+        )
+        .all()
+    )
+    for ev in events:
+        ev.acknowledged = True
+    db.commit()
+    floor_id = str(table.floor_id) if table and table.floor_id else "floor-1"
+    emit_sync(
+        "cash_payment_acknowledged",
+        {"tableId": table_id, "status": "ON_IT"},
+        room=floor_id,
+    )
+    return {"ok": True, "acknowledgedCount": len(events)}
+
+
+@router.post("/resolve-cash-payment")
+def resolve_cash_payment(
+    table_id: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    from app.models import AIEvent
+    from app.socket_manager import emit_sync
+
+    table = db.get(Table, table_id)
+    events = (
+        db.query(AIEvent)
+        .filter(
+            AIEvent.table_id == table_id,
+            AIEvent.event_type == "CASH_PAYMENT_REQUEST",
+            AIEvent.resolved.is_(False),
+        )
+        .all()
+    )
+    for ev in events:
+        ev.resolved = True
+        ev.acknowledged = True
+    db.commit()
+    floor_id = str(table.floor_id) if table and table.floor_id else "floor-1"
+    emit_sync(
+        "cash_payment_resolved",
+        {"tableId": table_id},
+        room=floor_id,
+    )
+    return {"ok": True, "resolvedCount": len(events)}
+
+
+@router.post("/request-bill")
+def guest_request_bill(
+    token: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    qr = _resolve_qr(db, token)
+    session = active_session_for_table(db, qr.table_id)
+    if not session:
+        raise HTTPException(404, "No active session for table")
+    bill = request_bill(db, session.id, user_id=None)
+    return bill.model_dump(by_alias=True)
+
+
+@router.post("/call-waiter")
+def guest_call_waiter(
+    token: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    qr = _resolve_qr(db, token)
+    table = db.get(Table, qr.table_id)
+    if not table:
+        raise HTTPException(404, "Table not found")
+    session = active_session_for_table(db, qr.table_id)
+    guest_name = session.guest_name if session and session.guest_name else "A guest"
+    ai_service.create_alert(
+        db,
+        AIEventCreate(
+            event_type="WAITER_CALL",
+            message=f"{guest_name} at Table {table.number} needs help",
+            table_id=table.id,
+            target_role="WAITER",
+        ),
+    )
+    from app.socket_manager import emit_sync
+    floor_id = str(table.floor_id) if table and table.floor_id else "floor-1"
+    emit_sync(
+        "waiter_call",
+        {
+            "tableId": table.id,
+            "tableNumber": table.number,
+            "guestName": guest_name,
+            "message": f"Table {table.number} called waiter",
+        },
+        room=floor_id,
+    )
+    return {"ok": True}
+
+
+@router.post("/acknowledge-waiter-call")
+def acknowledge_waiter_call(
+    table_id: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    from app.models import AIEvent
+    from app.socket_manager import emit_sync
+
+    table = db.get(Table, table_id)
+    events = (
+        db.query(AIEvent)
+        .filter(AIEvent.table_id == table_id, AIEvent.event_type == "WAITER_CALL", AIEvent.resolved.is_(False))
+        .all()
+    )
+    for ev in events:
+        ev.acknowledged = True
+    db.commit()
+    floor_id = str(table.floor_id) if table and table.floor_id else "floor-1"
+    emit_sync("waiter_call_acknowledged", {"tableId": table_id, "status": "ON_IT"}, room=floor_id)
+    return {"ok": True, "acknowledgedCount": len(events)}
+
+
+@router.post("/resolve-waiter-call")
+def resolve_waiter_call(
+    table_id: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    from app.models import AIEvent
+    from app.socket_manager import emit_sync
+
+    table = db.get(Table, table_id)
+    events = (
+        db.query(AIEvent)
+        .filter(AIEvent.table_id == table_id, AIEvent.event_type == "WAITER_CALL", AIEvent.resolved.is_(False))
+        .all()
+    )
+    for ev in events:
+        ev.resolved = True
+        ev.acknowledged = True
+    db.commit()
+    floor_id = str(table.floor_id) if table and table.floor_id else "floor-1"
+    emit_sync("waiter_call_resolved", {"tableId": table_id}, room=floor_id)
+    return {"ok": True, "resolvedCount": len(events)}
+
+
+
+@router.get("/waiter-status")
+def guest_waiter_status(
+    token: str = Query(...),
+    event_type: str = Query("WAITER_CALL"),
+    db: Session = Depends(get_db),
+):
+    from app.models import AIEvent
+
+    qr = _resolve_qr(db, token)
+    event = (
+        db.query(AIEvent)
+        .filter(
+            AIEvent.table_id == qr.table_id,
+            AIEvent.event_type == event_type,
+            AIEvent.resolved.is_(False),
+        )
+        .order_by(AIEvent.created_at.desc())
+        .first()
+    )
+    if not event:
+        return None
+    return {"acknowledged": event.acknowledged, "eventType": event.event_type}
