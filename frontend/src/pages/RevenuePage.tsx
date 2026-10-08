@@ -1,17 +1,26 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 
 export function RevenuePage() {
   const { user } = useAuth()
+  const [searchParams] = useSearchParams()
+  const dateFromQuery = searchParams.get('date')
   const [dailySummary, setDailySummary] = useState<any>(null)
   const [paymentSummary, setPaymentSummary] = useState<any>(null)
   const [cashierSummaries, setCashierSummaries] = useState<any[]>([])
   const [shiftSummaries, setShiftSummaries] = useState<any[]>([])
   const [ownRevenue, setOwnRevenue] = useState<any>(null)
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0])
+  const [selectedDate, setSelectedDate] = useState(dateFromQuery || new Date().toISOString().split('T')[0])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (dateFromQuery && dateFromQuery !== selectedDate) {
+      setSelectedDate(dateFromQuery)
+    }
+  }, [dateFromQuery])
 
   useEffect(() => {
     fetchData()

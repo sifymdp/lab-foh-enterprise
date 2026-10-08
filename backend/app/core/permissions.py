@@ -129,8 +129,10 @@ PERM_CUSTOMER_VIEW   = "customer.view"
 PERM_CUSTOMER_MANAGE = "customer.manage"
 
 # AI & operational insights
-PERM_INSIGHTS_VIEW = "insights.view"
-PERM_AI_FEATURES   = "ai.features"
+PERM_INSIGHTS_VIEW     = "insights.view"
+PERM_AI_FEATURES       = "ai.features"
+PERM_AI_ASSISTANT_USE  = "ai.assistant.use"
+PERM_AI_FINANCIAL_REPORTING = "ai.financial.reporting"
 
 # voice / telephony
 PERM_VOICE_MANAGE = "voice.manage"
@@ -139,6 +141,8 @@ PERM_VOICE_MANAGE = "voice.manage"
 PERM_MENU_VIEW = "menu.view"
 
 ALL_PERMISSIONS = {
+    PERM_AI_ASSISTANT_USE,
+    PERM_AI_FINANCIAL_REPORTING,
     PERM_USER_VIEW, PERM_USER_CREATE, PERM_USER_UPDATE, PERM_USER_DEACTIVATE, PERM_USER_DELETE,
     PERM_ROLES_VIEW, PERM_ROLES_CREATE, PERM_ROLES_UPDATE,
     PERM_PERMISSIONS_VIEW, PERM_PERMISSIONS_MANAGE,
@@ -206,7 +210,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         # Customer / Guest
         PERM_CUSTOMER_VIEW, PERM_CUSTOMER_MANAGE,
         # AI & Insights
-        PERM_INSIGHTS_VIEW, PERM_AI_FEATURES,
+        PERM_INSIGHTS_VIEW, PERM_AI_FEATURES, PERM_AI_ASSISTANT_USE,
         # Voice
         PERM_VOICE_MANAGE,
     },
@@ -220,8 +224,8 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         PERM_CAMERA_VIEW, PERM_CAMERA_OVERRIDE,
         # Customer portal management
         PERM_CUSTOMER_VIEW,
-        # Insights (view only)
-        PERM_INSIGHTS_VIEW,
+        # Insights & AI Assistant
+        PERM_INSIGHTS_VIEW, PERM_AI_FEATURES, PERM_AI_ASSISTANT_USE,
         # Menu (view only)
         PERM_MENU_VIEW,
     },
@@ -233,6 +237,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         PERM_PAYMENT_VIEW, PERM_PAYMENT_CREATE,
         PERM_RESERVATIONS_MANAGE,
         PERM_CUSTOMER_VIEW,
+        PERM_AI_FEATURES, PERM_AI_ASSISTANT_USE,
     },
     "CASHIER": {
         # Billing
@@ -251,6 +256,8 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         PERM_SETTINGS_VIEW,
         # Menu (view only)
         PERM_MENU_VIEW,
+        # AI Assistant
+        PERM_AI_FEATURES, PERM_AI_ASSISTANT_USE,
     },
     "WAITER": {
         PERM_TABLE_VIEW,
@@ -264,6 +271,8 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         PERM_MENU_VIEW,
         # Customer (view guest info)
         PERM_CUSTOMER_VIEW,
+        # AI Assistant & Insights
+        PERM_INSIGHTS_VIEW, PERM_AI_FEATURES, PERM_AI_ASSISTANT_USE,
     },
     "CHEF": {
         # Kitchen — full visibility and management
@@ -281,8 +290,8 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         PERM_BILLING_VIEW,
         # Menu (view and management)
         PERM_MENU_VIEW, PERM_MENU_MANAGE,
-        # AI features (cooking time prediction, demand forecast)
-        PERM_AI_FEATURES,
+        # AI features & Assistant (cooking time prediction, demand forecast, recipes)
+        PERM_AI_FEATURES, PERM_AI_ASSISTANT_USE,
     },
 }
 
@@ -318,21 +327,24 @@ def has_user_permission(db: Session, user, permission: str) -> bool:
     """
     Dynamic effective permission calculator. Checks:
     1. Owner override (always True)
-    2. Temporary permissions (valid end_time >= now)
+    2. Temporary permissions (valid end_time >= now, status == ACTIVE)
     3. Direct user permission override
-    4. Database role permission mapping (custom or customized default roles)
-    5. Fallback to static ROLE_PERMISSIONS mapping
+    4. Database role permission mapping (scoped to user's tenant)
+    5. Standard ROLE_PERMISSIONS catalogue baseline (for built-in system roles)
     """
+    if not user:
+        return False
+
+    r = normalize_role(getattr(user, "role", "") or "")
+    if r == "OWNER":
+        return True
+
     from app.models.role import Role
     from app.models.role_permission import RolePermission
     from app.models.user_permission import UserPermission
     from app.models.temporary_permission import TemporaryPermission
     from datetime import datetime, timezone
-
-    # 1. OWNER always has all permissions
-    r = normalize_role(user.role)
-    if r == "OWNER":
-        return True
+    from sqlalchemy import func
 
     # 2. Check active temporary permissions
     now = datetime.now(timezone.utc)
@@ -362,15 +374,13 @@ def has_user_permission(db: Session, user, permission: str) -> bool:
     if direct_exists:
         return True
 
-    # 4. Check DB role permissions
-    from sqlalchemy import func
-    db_role = (
-        db.query(Role)
-        .filter(
-            func.upper(Role.name) == r,
-        )
-        .first()
-    )
+    # 4. Check DB role permissions scoped to tenant
+    user_tenant_id = getattr(user, "tenant_id", None)
+    role_query = db.query(Role).filter(func.upper(Role.name) == r)
+    if user_tenant_id:
+        role_query = role_query.filter(Role.tenant_id == user_tenant_id)
+    db_role = role_query.first()
+
     if db_role:
         role_perm_exists = (
             db.query(RolePermission)
@@ -380,9 +390,13 @@ def has_user_permission(db: Session, user, permission: str) -> bool:
             )
             .first()
         )
-        return role_perm_exists is not None
+        if role_perm_exists:
+            return True
+        # If this is a custom role, only its explicit DB permissions apply
+        if getattr(db_role, "is_custom", False):
+            return False
 
-    # 5. Fallback to static mapping ONLY if role is completely missing from DB
+    # 5. Fallback to standard role catalogue for built-in system roles
     return permission in ROLE_PERMISSIONS.get(r, set())
 
 
@@ -424,4 +438,22 @@ def require_permission(permission: str, user: Any, db: Session) -> None:
             status_code=403,
             detail=f"Permission denied. Required: '{permission}'",
         )
+
+
+def is_authorized_for_financial_reporting(user: Any, db: Session | None = None) -> bool:
+    """Owner AI is allowed to answer financial/reporting questions ONLY for an authorized Owner
+
+    (or users with explicit PERM_AI_FINANCIAL_REPORTING).
+    Non-owner roles (Manager, Cashier, Host, Waiter, Kitchen) are BLOCKED by default.
+    """
+    if not user:
+        return False
+    if hasattr(user, "is_active") and not user.is_active:
+        return False
+    role = getattr(user, "role", "")
+    if normalize_role(role) == "OWNER":
+        return True
+    if db is not None:
+        return has_user_permission(db, user, PERM_AI_FINANCIAL_REPORTING)
+    return has_permission(role, PERM_AI_FINANCIAL_REPORTING)
 

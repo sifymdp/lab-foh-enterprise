@@ -34,6 +34,30 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4o-mini"
     openai_base_url: str = ""
 
+    # 4. OpenRouter Gateway & Multi-Model Orchestration
+    openrouter_api_key: str = ""
+    ai_provider: str = "openrouter"
+    ai_primary_model: str = "openai/gpt-4o-mini"
+    ai_vision_model: str = "openai/gpt-4o-mini"
+    ai_decision_model: str = "openai/gpt-4o-mini"
+    ai_fallback_models: str = "meta-llama/llama-3.3-70b-instruct,google/gemini-2.0-flash-001"
+    ai_request_timeout_seconds: int = 20
+    ai_max_tool_rounds: int = 6
+    ai_enabled: bool = True
+
+    # 5. Enterprise RAG & Knowledge Layer Configuration
+    rag_enabled: bool = True
+    rag_vector_store: str = "sql"  # sql | pgvector | qdrant | chroma
+    rag_embedding_provider: str = "openrouter"  # openrouter | openai | local
+    rag_embedding_model: str = "openai/text-embedding-3-small"
+    rag_embedding_dimensions: int = 384
+    rag_chunk_size: int = 500
+    rag_chunk_overlap: int = 50
+    rag_top_k: int = 4
+    rag_min_confidence: float = 0.35
+    rag_hybrid_weight_dense: float = 0.7
+    rag_hybrid_weight_sparse: float = 0.3
+
     guest_menu_base_url: str = "http://localhost:8000"
     payment_webhook_secret: str = "dev-webhook-secret"
 

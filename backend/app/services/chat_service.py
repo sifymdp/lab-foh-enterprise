@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.core.status_machine import VALID_TRANSITIONS
-from app.models import AIEvent, Bill, DiningSession, MenuItem, Order, Reservation, Table
+from app.models import AIEvent, DiningSession, MenuItem, Order, Reservation, Table
 from app.models.user import User
 from app.schemas.ai import ChatAction
 from app.schemas.menu import MenuItemUpdate
@@ -209,15 +209,12 @@ def _tool_shift_stats(db: Session, user: User, args: dict) -> dict:
     todays_sessions = [s for s in sessions if s.seated_at and s.seated_at.date() == today]
     orders = db.query(Order).all()
     todays_orders = [o for o in orders if o.placed_at and o.placed_at.date() == today]
-    paid_bills = db.query(Bill).filter(Bill.status == "PAID").all()
-    revenue = sum(float(b.total) for b in paid_bills if b.paid_at and b.paid_at.date() == today)
     covers = sum(s.party_size for s in todays_sessions)
     return {
         "date": today.isoformat(),
         "seatedParties": len(todays_sessions),
         "covers": covers,
         "ordersToday": len(todays_orders),
-        "paidRevenueToday": round(revenue, 2),
     }
 
 
@@ -964,16 +961,20 @@ def chat(db: Session, user: User, messages: list[dict]) -> tuple[str, list[ChatA
     last_user_message = next(
         (str(m.get("content") or "") for m in reversed(messages) if m.get("role") == "user"), ""
     )
-
-    # Fast-path accuracy guard: plain "which tables are free?" questions
-    # are answered straight from DB to ensure 100% precision.
-    if _availability_question(last_user_message):
-        return _availability_answer(db), []
-
-    # Check if a cloud LLM is active
-    from app.services.groq_llm import get_active_provider
-
-    active_provider = get_active_provider()
+    from app.services.ai_agent import ai_orchestrator
+    res = ai_orchestrator.process_request(db, user, last_user_message)
+    chat_actions = [
+        ChatAction(
+            type=a.type,
+            route=a.route,
+            filter=a.filter,
+            table_ids=a.table_ids,
+            summary=f"{a.type} -> {a.route}" if a.route else a.type,
+            ok=True,
+        )
+        for a in res.actions
+    ]
+    return res.response.summary, chat_actions
     if not active_provider:
         # No cloud LLM configured — route through intelligent local engine
         return _fallback_process(db, user, last_user_message)

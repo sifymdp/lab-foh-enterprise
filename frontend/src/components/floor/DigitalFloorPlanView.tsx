@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState } from 'react'
 import type { Floor } from '../../types'
 import { STATUS_CONFIG, SECTION_ICONS } from '../../services/tableConfig'
 
@@ -44,6 +44,13 @@ interface DigitalFloorPlanViewProps {
   selectedSuggestionId: string | null
   onSelectTable: (tableId: string) => void
   onSelectSuggestion: (suggestionId: string) => void
+  onApproveSuggestion?: (suggestionId: string) => void
+  onRejectSuggestion?: (suggestionId: string) => void
+  onIgnoreSuggestion?: (suggestionId: string) => void
+  onMakeSingleTable?: (suggestionId: string) => void
+  onApproveAll?: () => void
+  onMakeAllTables?: (replaceOld?: boolean) => void
+  isApplying?: boolean
 }
 
 function safeNum(val: unknown, fallback: number = 0): number {
@@ -59,19 +66,40 @@ export const DigitalFloorPlanView: React.FC<DigitalFloorPlanViewProps> = ({
   selectedSuggestionId,
   onSelectTable,
   onSelectSuggestion,
+  onApproveSuggestion,
+  onRejectSuggestion,
+  onIgnoreSuggestion,
+  onMakeSingleTable,
+  onApproveAll,
+  onMakeAllTables,
+  isApplying = false,
 }) => {
+  const [filterStatus, setFilterStatus] = useState<'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED'>('ALL')
+
   const floorWidth = Math.max(safeNum(floor?.width, 1000), 400)
   const floorHeight = Math.max(safeNum(floor?.height, 700), 300)
   const tables = Array.isArray(floor?.tables) ? floor.tables : []
   const sections = Array.isArray(floor?.sections) ? floor.sections : []
   const labels = Array.isArray(floor?.labels) ? floor.labels : []
 
-  // Calculate detection accuracy metrics
+  // Metrics
   const avgConfidence = suggestions.length > 0
     ? Math.round(
         (suggestions.reduce((acc, s) => acc + safeNum(s.confidence, 0.85), 0) / suggestions.length) * 100
       )
     : 0
+
+  const pendingCount = suggestions.filter((s) => s.status === 'PENDING').length
+  const approvedCount = suggestions.filter((s) => s.status === 'APPROVED').length
+  const rejectedCount = suggestions.filter((s) => s.status === 'REJECTED').length
+
+  const filteredSuggestions = suggestions.filter((s) => {
+    if (filterStatus === 'ALL') return true
+    return s.status === filterStatus
+  })
+
+  const selectedSuggestion = suggestions.find((s) => s.id === selectedSuggestionId)
+  const selectedIndex = selectedSuggestion ? suggestions.findIndex((s) => s.id === selectedSuggestion.id) : -1
 
   const driftSuggestions = suggestions.filter(
     (s) => s.suggestion_type === 'POSITION_CHANGE' && safeNum(s.drift_distance, 0) > 15
@@ -79,6 +107,172 @@ export const DigitalFloorPlanView: React.FC<DigitalFloorPlanViewProps> = ({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+      {/* ── Top Digital Twin Action Bar & Bulk Controls ── */}
+      {viewMode === 'ai_suggested' && suggestions.length > 0 && (
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            padding: '0.75rem 1rem',
+            background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)',
+            border: '1px solid #cbd5e1',
+            borderRadius: '10px',
+            flexWrap: 'wrap',
+            gap: '0.75rem',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+          }}
+        >
+          {/* Left: Filter Buttons & Status Badges */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#334155', marginRight: '4px' }}>
+              Filter Tables:
+            </span>
+            <button
+              type="button"
+              onClick={() => setFilterStatus('ALL')}
+              style={{
+                fontSize: '0.75rem',
+                fontWeight: 700,
+                padding: '3px 10px',
+                borderRadius: '6px',
+                border: '1px solid',
+                cursor: 'pointer',
+                background: filterStatus === 'ALL' ? '#0f172a' : '#ffffff',
+                color: filterStatus === 'ALL' ? '#ffffff' : '#475569',
+                borderColor: filterStatus === 'ALL' ? '#0f172a' : '#cbd5e1',
+              }}
+            >
+              All ({suggestions.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setFilterStatus('PENDING')}
+              style={{
+                fontSize: '0.75rem',
+                fontWeight: 700,
+                padding: '3px 10px',
+                borderRadius: '6px',
+                border: '1px solid',
+                cursor: 'pointer',
+                background: filterStatus === 'PENDING' ? '#d97706' : '#ffffff',
+                color: filterStatus === 'PENDING' ? '#ffffff' : '#d97706',
+                borderColor: filterStatus === 'PENDING' ? '#d97706' : '#fde68a',
+              }}
+            >
+              ⏳ Pending ({pendingCount})
+            </button>
+            <button
+              type="button"
+              onClick={() => setFilterStatus('APPROVED')}
+              style={{
+                fontSize: '0.75rem',
+                fontWeight: 700,
+                padding: '3px 10px',
+                borderRadius: '6px',
+                border: '1px solid',
+                cursor: 'pointer',
+                background: filterStatus === 'APPROVED' ? '#16a34a' : '#ffffff',
+                color: filterStatus === 'APPROVED' ? '#ffffff' : '#16a34a',
+                borderColor: filterStatus === 'APPROVED' ? '#16a34a' : '#bbf7d0',
+              }}
+            >
+              ✓ Approved ({approvedCount})
+            </button>
+            {rejectedCount > 0 && (
+              <button
+                type="button"
+                onClick={() => setFilterStatus('REJECTED')}
+                style={{
+                  fontSize: '0.75rem',
+                  fontWeight: 700,
+                  padding: '3px 10px',
+                  borderRadius: '6px',
+                  border: '1px solid',
+                  cursor: 'pointer',
+                  background: filterStatus === 'REJECTED' ? '#dc2626' : '#ffffff',
+                  color: filterStatus === 'REJECTED' ? '#ffffff' : '#dc2626',
+                  borderColor: filterStatus === 'REJECTED' ? '#dc2626' : '#fecaca',
+                }}
+              >
+                ✕ Rejected ({rejectedCount})
+              </button>
+            )}
+          </div>
+
+          {/* Right: Direct Bulk Action Buttons */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+            {pendingCount > 0 && onApproveAll && (
+              <button
+                type="button"
+                onClick={onApproveAll}
+                disabled={isApplying}
+                style={{
+                  background: '#16a34a',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '7px',
+                  padding: '5px 12px',
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  boxShadow: '0 2px 4px rgba(22, 163, 74, 0.2)',
+                }}
+              >
+                ⚡ Approve All Pending ({pendingCount})
+              </button>
+            )}
+
+            {onMakeAllTables && (
+              <button
+                type="button"
+                onClick={() => onMakeAllTables(true)}
+                disabled={isApplying}
+                style={{
+                  background: '#2563eb',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '7px',
+                  padding: '5px 12px',
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  boxShadow: '0 2px 4px rgba(37, 99, 235, 0.2)',
+                }}
+              >
+                🚀 Make All Tables (Clear Old)
+              </button>
+            )}
+
+            {onMakeAllTables && (
+              <button
+                type="button"
+                onClick={() => onMakeAllTables(false)}
+                disabled={isApplying}
+                style={{
+                  background: '#ffffff',
+                  color: '#0f172a',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: '7px',
+                  padding: '5px 10px',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                🔄 Update & Keep Existing
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Accuracy & Status Banner */}
       <div
         style={{
@@ -122,6 +316,9 @@ export const DigitalFloorPlanView: React.FC<DigitalFloorPlanViewProps> = ({
                   ✓ {avgConfidence}% Avg Accuracy {avgConfidence >= 80 ? '(Target ≥80% Met)' : ''}
                 </span>
               )}
+              <span style={{ color: '#475569', fontSize: '0.75rem', marginLeft: '6px' }}>
+                💡 Click any table on the canvas below to approve, deny, or commit it instantly!
+              </span>
             </>
           )}
           {viewMode === 'overlay' && (
@@ -176,7 +373,7 @@ export const DigitalFloorPlanView: React.FC<DigitalFloorPlanViewProps> = ({
         </div>
       </div>
 
-      {/* SVG Canvas Area */}
+      {/* SVG Canvas & Interactive Table Inspector Area */}
       <div
         style={{
           position: 'relative',
@@ -188,6 +385,175 @@ export const DigitalFloorPlanView: React.FC<DigitalFloorPlanViewProps> = ({
           boxShadow: 'inset 0 1px 3px rgba(0, 0, 0, 0.04)',
         }}
       >
+        {/* Floating Quick Action Inspector for Clicked Table */}
+        {selectedSuggestion && (
+          <div
+            style={{
+              position: 'absolute',
+              top: 12,
+              right: 12,
+              zIndex: 30,
+              background: 'rgba(255, 255, 255, 0.98)',
+              backdropFilter: 'blur(8px)',
+              border: '2px solid #2563eb',
+              borderRadius: '12px',
+              padding: '14px 16px',
+              width: '290px',
+              boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '1.2rem' }}>🪑</span>
+                <strong style={{ fontSize: '1.05rem', color: '#0f172a' }}>
+                  {selectedSuggestion.suggested_label || `Table T${selectedIndex + 1}`}
+                </strong>
+              </div>
+              <button
+                type="button"
+                onClick={() => onSelectSuggestion('')}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '1rem',
+                  color: '#64748b',
+                  cursor: 'pointer',
+                  padding: '2px 6px',
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ fontSize: '0.78rem', color: '#475569', marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <div>
+                <strong>Shape:</strong> {selectedSuggestion.detected_position?.shape || 'RECTANGLE'} •{' '}
+                <strong>Capacity:</strong> {safeNum(selectedSuggestion.detected_position?.capacity, 4)} Persons
+              </div>
+              <div>
+                <strong>Confidence:</strong>{' '}
+                <span style={{ color: '#16a34a', fontWeight: 700 }}>
+                  {Math.round(safeNum(selectedSuggestion.confidence, 0.85) * 100)}%
+                </span>{' '}
+                • <strong>Status:</strong>{' '}
+                <span
+                  style={{
+                    padding: '1px 6px',
+                    borderRadius: '4px',
+                    fontWeight: 700,
+                    background:
+                      selectedSuggestion.status === 'APPROVED'
+                        ? '#dcfce7'
+                        : selectedSuggestion.status === 'REJECTED'
+                        ? '#fee2e2'
+                        : '#fef3c7',
+                    color:
+                      selectedSuggestion.status === 'APPROVED'
+                        ? '#166534'
+                        : selectedSuggestion.status === 'REJECTED'
+                        ? '#b91c1c'
+                        : '#92400e',
+                  }}
+                >
+                  {selectedSuggestion.status}
+                </span>
+              </div>
+            </div>
+
+            {/* Quick Action Buttons */}
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+              {onApproveSuggestion && (
+                <button
+                  type="button"
+                  onClick={() => onApproveSuggestion(selectedSuggestion.id)}
+                  style={{
+                    flex: 1,
+                    background: selectedSuggestion.status === 'APPROVED' ? '#15803d' : '#16a34a',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '6px',
+                    padding: '6px 10px',
+                    fontSize: '0.78rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '4px',
+                  }}
+                >
+                  ✓ Approve
+                </button>
+              )}
+
+              {onRejectSuggestion && (
+                <button
+                  type="button"
+                  onClick={() => onRejectSuggestion(selectedSuggestion.id)}
+                  style={{
+                    flex: 1,
+                    background: selectedSuggestion.status === 'REJECTED' ? '#b91c1c' : '#ffffff',
+                    color: selectedSuggestion.status === 'REJECTED' ? '#ffffff' : '#dc2626',
+                    border: '1px solid #dc2626',
+                    borderRadius: '6px',
+                    padding: '6px 10px',
+                    fontSize: '0.78rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '4px',
+                  }}
+                >
+                  ✕ Reject
+                </button>
+              )}
+
+              {onMakeSingleTable && (
+                <button
+                  type="button"
+                  onClick={() => onMakeSingleTable(selectedSuggestion.id)}
+                  style={{
+                    width: '100%',
+                    background: '#2563eb',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '6px',
+                    padding: '6px 10px',
+                    fontSize: '0.78rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    marginTop: '4px',
+                  }}
+                >
+                  + Commit Table Now
+                </button>
+              )}
+
+              {onIgnoreSuggestion && (
+                <button
+                  type="button"
+                  onClick={() => onIgnoreSuggestion(selectedSuggestion.id)}
+                  style={{
+                    width: '100%',
+                    background: 'transparent',
+                    color: '#64748b',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: '6px',
+                    padding: '4px 10px',
+                    fontSize: '0.74rem',
+                    cursor: 'pointer',
+                    marginTop: '2px',
+                  }}
+                >
+                  Ignore Suggestion
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
         <svg
           viewBox={`0 0 ${floorWidth} ${floorHeight}`}
           style={{
@@ -205,7 +571,11 @@ export const DigitalFloorPlanView: React.FC<DigitalFloorPlanViewProps> = ({
             </pattern>
 
             <filter id="selectGlow" x="-20%" y="-20%" width="140%" height="140%">
-              <feDropShadow dx="0" dy="0" stdDeviation="4" floodColor="#2563eb" floodOpacity="0.5" />
+              <feDropShadow dx="0" dy="0" stdDeviation="5" floodColor="#2563eb" floodOpacity="0.7" />
+            </filter>
+
+            <filter id="approvedGlow" x="-20%" y="-20%" width="140%" height="140%">
+              <feDropShadow dx="0" dy="0" stdDeviation="4" floodColor="#16a34a" floodOpacity="0.6" />
             </filter>
 
             <filter id="cctvGlow" x="-20%" y="-20%" width="140%" height="140%">
@@ -254,109 +624,24 @@ export const DigitalFloorPlanView: React.FC<DigitalFloorPlanViewProps> = ({
             )
           })}
 
-          {/* Floor Labels */}
-          {labels.map((label) => {
-            const lx = safeNum(label?.bounds?.x, 0)
-            const ly = safeNum(label?.bounds?.y, 0)
-            const lw = Math.max(safeNum(label?.bounds?.width, 60), 20)
-            const lh = Math.max(safeNum(label?.bounds?.height, 24), 16)
-
+          {/* Floor Text Labels / Annotations */}
+          {labels.map((lbl) => {
+            const lx = safeNum(lbl?.bounds?.x, 0)
+            const ly = safeNum(lbl?.bounds?.y, 0)
             return (
-              <g key={label.id}>
-                <rect
-                  x={lx}
-                  y={ly}
-                  width={lw}
-                  height={lh}
-                  fill="#f1f5f9"
-                  stroke="#cbd5e1"
-                  strokeWidth="1"
-                  rx="4"
-                />
-                <text
-                  x={lx + lw / 2}
-                  y={ly + lh / 2 + 4}
-                  textAnchor="middle"
-                  fill="#475569"
-                  fontSize="11"
-                  fontWeight="600"
-                >
-                  {label.text || ''}
-                </text>
-              </g>
+              <text
+                key={lbl.id}
+                x={lx}
+                y={ly + 16}
+                fill="#94a3b8"
+                fontSize="11"
+                fontWeight="600"
+                opacity="0.75"
+              >
+                {lbl.text}
+              </text>
             )
           })}
-
-          {/* OVERLAY DRIFT LINES (Connecting DB Table to CCTV Observation) */}
-          {viewMode === 'overlay' &&
-            suggestions.map((s) => {
-              if (!s.existing_table_id && !s.existing_table) return null
-              const matchedTable = tables.find(
-                (t) => t.id === s.existing_table_id || (s.existing_table && t.id === s.existing_table.id)
-              )
-              if (!matchedTable) return null
-
-              const tX = safeNum(matchedTable.x, 0)
-              const tY = safeNum(matchedTable.y, 0)
-              const tW = safeNum(matchedTable.width, 80)
-              const tH = safeNum(matchedTable.height, 80)
-
-              const pos = s.detected_position || {}
-              const cX = safeNum(pos.x, tX)
-              const cY = safeNum(pos.y, tY)
-              const cW = safeNum(pos.width, tW)
-              const cH = safeNum(pos.height, tH)
-
-              const tCenterX = tX + tW / 2
-              const tCenterY = tY + tH / 2
-              const cCenterX = cX + cW / 2
-              const cCenterY = cY + cH / 2
-
-              const dist = Math.round(
-                safeNum(s.drift_distance, Math.hypot(tCenterX - cCenterX, tCenterY - cCenterY))
-              )
-              const midX = Math.round((tCenterX + cCenterX) / 2)
-              const midY = Math.round((tCenterY + cCenterY) / 2)
-
-              return (
-                <g key={`drift-${s.id}`}>
-                  <line
-                    x1={tCenterX}
-                    y1={tCenterY}
-                    x2={cCenterX}
-                    y2={cCenterY}
-                    stroke={dist > 25 ? '#ef4444' : '#f59e0b'}
-                    strokeWidth="2"
-                    strokeDasharray="4 4"
-                  />
-                  <circle cx={cCenterX} cy={cCenterY} r="3" fill="#0284c7" />
-                  {dist > 15 && (
-                    <g transform={`translate(${midX}, ${midY})`}>
-                      <rect
-                        x="-28"
-                        y="-10"
-                        width="56"
-                        height="20"
-                        rx="4"
-                        fill="#ffffff"
-                        stroke={dist > 25 ? '#ef4444' : '#f59e0b'}
-                        strokeWidth="1"
-                      />
-                      <text
-                        x="0"
-                        y="4"
-                        textAnchor="middle"
-                        fill={dist > 25 ? '#b91c1c' : '#b45309'}
-                        fontSize="9"
-                        fontWeight="700"
-                      >
-                        {dist}px drift
-                      </text>
-                    </g>
-                  )}
-                </g>
-              )
-            })}
 
           {/* CURRENT LAYOUT TABLES (Shown in 'current' and 'overlay' modes) */}
           {(viewMode === 'current' || viewMode === 'overlay') &&
@@ -446,7 +731,7 @@ export const DigitalFloorPlanView: React.FC<DigitalFloorPlanViewProps> = ({
 
           {/* AI SUGGESTED TABLES (Shown in 'ai_suggested' and 'overlay' modes) */}
           {(viewMode === 'ai_suggested' || viewMode === 'overlay') &&
-            suggestions.map((s, idx) => {
+            filteredSuggestions.map((s, idx) => {
               const isSelected = selectedSuggestionId === s.id
               const isOverlay = viewMode === 'overlay'
               const pos = s.detected_position || {}
@@ -522,16 +807,26 @@ export const DigitalFloorPlanView: React.FC<DigitalFloorPlanViewProps> = ({
               }
 
               // Full AI Proposed Table styling in 'ai_suggested' mode
-              const statusBg =
-                s.status === 'APPROVED' ? '#ecfdf5' : s.status === 'APPLIED' ? '#eef2ff' : '#f0f9ff'
-              const statusBorder =
-                isSelected
-                  ? '#2563eb'
-                  : s.status === 'APPROVED'
-                  ? '#16a34a'
-                  : s.status === 'APPLIED'
-                  ? '#4f46e5'
-                  : '#0284c7'
+              const isApproved = s.status === 'APPROVED'
+              const isRejected = s.status === 'REJECTED'
+
+              const statusBg = isApproved
+                ? '#ecfdf5'
+                : isRejected
+                ? '#fef2f2'
+                : s.status === 'APPLIED'
+                ? '#eef2ff'
+                : '#f0f9ff'
+
+              const statusBorder = isSelected
+                ? '#2563eb'
+                : isApproved
+                ? '#16a34a'
+                : isRejected
+                ? '#dc2626'
+                : s.status === 'APPLIED'
+                ? '#4f46e5'
+                : '#0284c7'
 
               const badgeX = Math.round(px + pw - 48)
               const badgeY = Math.round(py + 4)
@@ -543,7 +838,7 @@ export const DigitalFloorPlanView: React.FC<DigitalFloorPlanViewProps> = ({
                   key={s.id}
                   onClick={() => onSelectSuggestion(s.id)}
                   style={{ cursor: 'pointer' }}
-                  filter={isSelected ? 'url(#selectGlow)' : undefined}
+                  filter={isSelected ? 'url(#selectGlow)' : isApproved ? 'url(#approvedGlow)' : undefined}
                 >
                   {isCircle ? (
                     <circle
@@ -552,7 +847,7 @@ export const DigitalFloorPlanView: React.FC<DigitalFloorPlanViewProps> = ({
                       r={Math.min(pw, ph) / 2}
                       fill={statusBg}
                       stroke={statusBorder}
-                      strokeWidth={isSelected ? 3 : 2}
+                      strokeWidth={isSelected ? 3.5 : isApproved ? 2.5 : 2}
                     />
                   ) : (
                     <rect
@@ -564,7 +859,7 @@ export const DigitalFloorPlanView: React.FC<DigitalFloorPlanViewProps> = ({
                       ry="10"
                       fill={statusBg}
                       stroke={statusBorder}
-                      strokeWidth={isSelected ? 3 : 2}
+                      strokeWidth={isSelected ? 3.5 : isApproved ? 2.5 : 2}
                     />
                   )}
 
@@ -573,7 +868,7 @@ export const DigitalFloorPlanView: React.FC<DigitalFloorPlanViewProps> = ({
                     x={px + pw / 2}
                     y={py + ph / 2 - 6}
                     textAnchor="middle"
-                    fill="#0f172a"
+                    fill={isApproved ? '#14532d' : isRejected ? '#991b1b' : '#0f172a'}
                     fontSize="13"
                     fontWeight="800"
                   >
@@ -619,24 +914,28 @@ export const DigitalFloorPlanView: React.FC<DigitalFloorPlanViewProps> = ({
                     <rect
                       x="0"
                       y="0"
-                      width="52"
+                      width="54"
                       height="14"
                       rx="3"
                       fill={
-                        s.status === 'APPROVED'
+                        isApproved
                           ? '#dcfce7'
+                          : isRejected
+                          ? '#fee2e2'
                           : s.status === 'APPLIED'
                           ? '#e0e7ff'
                           : '#fef3c7'
                       }
                     />
                     <text
-                      x="26"
+                      x="27"
                       y="10"
                       textAnchor="middle"
                       fill={
-                        s.status === 'APPROVED'
+                        isApproved
                           ? '#166534'
+                          : isRejected
+                          ? '#b91c1c'
                           : s.status === 'APPLIED'
                           ? '#3730a3'
                           : '#92400e'
@@ -644,7 +943,7 @@ export const DigitalFloorPlanView: React.FC<DigitalFloorPlanViewProps> = ({
                       fontSize="7.5"
                       fontWeight="800"
                     >
-                      {s.status}
+                      {isApproved ? '✓ APPROVED' : isRejected ? '✕ REJECT' : s.status}
                     </text>
                   </g>
                 </g>
@@ -658,25 +957,7 @@ export const DigitalFloorPlanView: React.FC<DigitalFloorPlanViewProps> = ({
                 Floor Plan is Empty
               </text>
               <text textAnchor="middle" y="24" fill="#94a3b8" fontSize="12">
-                Click "⚡ Analyze Source & Perform Table Detection" on the live camera stream
-              </text>
-              <text textAnchor="middle" y="44" fill="#94a3b8" fontSize="12">
-                to automatically discover and map tables with ≥80% accuracy.
-              </text>
-            </g>
-          )}
-
-          {/* Empty State Overlay for AI Suggested Layout */}
-          {viewMode === 'ai_suggested' && suggestions.length === 0 && (
-            <g transform={`translate(${Math.round(floorWidth / 2)}, ${Math.round(floorHeight / 2 - 20)})`}>
-              <text textAnchor="middle" fill="#0369a1" fontSize="15" fontWeight="700">
-                No AI Table Suggestions Yet
-              </text>
-              <text textAnchor="middle" y="24" fill="#64748b" fontSize="12">
-                Run detection on the live restaurant stream to generate candidate tables.
-              </text>
-              <text textAnchor="middle" y="44" fill="#16a34a" fontSize="12" fontWeight="600">
-                Multi-frame vision model guarantees ≥80% confidence calibration.
+                Use "AI Suggested" mode to detect and add tables directly from CCTV
               </text>
             </g>
           )}

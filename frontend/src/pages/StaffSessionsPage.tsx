@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api/client'
+import { Pagination } from '../components/ui/Pagination'
 
 interface UserSessionItem {
   id: string
@@ -24,6 +25,10 @@ export function StaffSessionsPage() {
   const [selectedTimePeriod, setSelectedTimePeriod] = useState('ALL')
   const [selectedRole, setSelectedRole] = useState('ALL')
   const [selectedStatus, setSelectedStatus] = useState('ALL')
+
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(15)
 
   useEffect(() => {
     loadSessions()
@@ -156,6 +161,16 @@ export function StaffSessionsPage() {
       return true
     })
   }, [sessions, searchQuery, selectedDate, selectedTimePeriod, selectedRole, selectedStatus])
+
+  // Reset page when filter or search changes
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [searchQuery, selectedDate, selectedTimePeriod, selectedRole, selectedStatus])
+
+  const paginatedSessions = useMemo(() => {
+    const start = (currentPage - 1) * pageSize
+    return filteredSessions.slice(start, start + pageSize)
+  }, [filteredSessions, currentPage, pageSize])
 
   return (
     <div style={{ padding: '1.75rem', maxWidth: '1280px', margin: '0 auto' }}>
@@ -441,7 +456,7 @@ export function StaffSessionsPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredSessions.map((s) => {
+              {paginatedSessions.map((s) => {
                 const loginDateObj = new Date(s.loginTime)
                 const lastActObj = new Date(s.lastActivity)
 
@@ -524,6 +539,18 @@ export function StaffSessionsPage() {
               })}
             </tbody>
           </table>
+        )}
+
+        {filteredSessions.length > 0 && (
+          <Pagination
+            currentPage={currentPage}
+            totalItems={filteredSessions.length}
+            pageSize={pageSize}
+            onPageChange={setCurrentPage}
+            onPageSizeChange={setPageSize}
+            pageSizeOptions={[10, 15, 25, 50]}
+            itemName="sessions"
+          />
         )}
       </div>
     </div>

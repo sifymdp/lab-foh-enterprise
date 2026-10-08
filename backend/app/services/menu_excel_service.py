@@ -866,6 +866,14 @@ def approve_menu_import(
             },
             room=f"floor-{import_rec.branch_id or '1'}",
         )
+
+        # Automated Menu Knowledge RAG Extraction & Indexing
+        try:
+            from app.services.rag.domains.menu_extractor import sync_menu_to_rag
+            sync_menu_to_rag(db, import_rec.tenant_id or user.tenant_id, import_rec.branch_id)
+        except Exception as r_err:
+            logger.warning("Automated Menu RAG sync failed: %s", r_err)
+
         return version_rec
 
     except Exception as exc:

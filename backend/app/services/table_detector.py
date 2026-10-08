@@ -41,6 +41,7 @@ class CandidateTable:
     rotation: float = 0.0                # orientation angle in degrees (-45 to 45)
     frame_hits: int = 1                  # number of sample frames table was observed in
     temporal_stability: float = 0.85     # temporal persistence score (0.0 to 1.0)
+    polygon_points: list[list[float]] | None = None  # Normalized polygon boundary points
 
 
 def estimate_table_shape(contour: np.ndarray, w: int, h: int) -> tuple[str, float]:
@@ -115,10 +116,48 @@ def detect_candidate_tables(
     candidates: list[CandidateTable] = []
     det_counter = 1
 
-    # ── Strategy 1: YOLO11 Object Detection with Non-Maximum Suppression ───────
-    if vision_engine.is_ready:
+    # ── Strategy 1: Pluggable Model Detector with Non-Maximum Suppression ───────
+    raw_boxes: list[list[Any]] = []
+    eff_conf = max(0.08, min(min_confidence, 0.15))
+
+    detector = None
+    try:
+        from app.services.vision.registry.model_registry import model_registry
+        detector = model_registry.get_active_table_detector()
+    except Exception:
+        pass
+
+    if detector is not None and detector.is_loaded:
         try:
-            eff_conf = max(0.10, min(min_confidence, 0.20))
+            norm_dets = detector.detect(proc_frame)
+            for det in norm_dets:
+                if det.domain_class not in ("dining_table", "table", "patio_table"):
+                    continue
+
+                bx, by, bw, bh = det.geometry.xywh()
+                min_w = 20 if by < frame_h * 0.50 else 30
+                min_h = 16 if by < frame_h * 0.50 else 24
+                if bw < min_w or bh < min_h:
+                    continue
+                if bw > frame_w * 0.85 or bh > frame_h * 0.85:
+                    continue
+                if (by + bh) < frame_h * 0.18 and by < frame_h * 0.10:
+                    continue
+
+                aspect = bw / max(float(bh), 1.0)
+                is_valid_aspect = 0.50 <= aspect <= 3.4
+                is_floor_plane = (by + bh) >= frame_h * 0.15
+                if is_valid_aspect and is_floor_plane:
+                    calibrated_conf = min(0.96, max(0.82, round(0.78 + float(det.confidence) * 0.35, 2)))
+                else:
+                    calibrated_conf = round(float(det.confidence), 2)
+
+                raw_boxes.append([bx, by, bw, bh, calibrated_conf, det.geometry.points])
+        except Exception as e:
+            logger.warning("Pluggable table detector inference error: %s", e)
+
+    elif vision_engine.is_ready:
+        try:
             yolo_results = vision_engine.model.predict(
                 proc_frame,
                 classes=[60],
@@ -126,7 +165,6 @@ def detect_candidate_tables(
                 verbose=False,
                 device=vision_engine.device,
             )
-            raw_boxes: list[list[Any]] = []
             if yolo_results and yolo_results[0].boxes:
                 for box in yolo_results[0].boxes:
                     x1, y1, x2, y2 = map(int, box.xyxy[0])
@@ -136,70 +174,70 @@ def detect_candidate_tables(
                     bw = min(x2 - x1, frame_w - bx)
                     bh = min(y2 - y1, frame_h - by)
 
-                    # Perspective-aware minimum size: distant tables higher in frame appear smaller
-                    min_w = 26 if by < frame_h * 0.50 else 42
-                    min_h = 22 if by < frame_h * 0.50 else 36
+                    min_w = 20 if by < frame_h * 0.50 else 30
+                    min_h = 16 if by < frame_h * 0.50 else 24
                     if bw < min_w or bh < min_h:
                         continue
                     if bw > frame_w * 0.85 or bh > frame_h * 0.85:
                         continue
-                    # Table ROI validation: tables are positioned on the dining floor plane, not overhead signage
-                    if (by + bh) < frame_h * 0.22 and by < frame_h * 0.15:
+                    if (by + bh) < frame_h * 0.18 and by < frame_h * 0.10:
                         continue
 
-                    # Multi-cue dining table confidence calibration:
-                    # In angled surveillance CCTV, raw YOLO confidence on furniture is often 0.20-0.45.
-                    # When verified on the dining floor plane with realistic dining aspect ratio (0.65 - 3.2),
-                    # we calibrate confidence to physical accuracy (80% - 94%).
                     aspect = bw / max(float(bh), 1.0)
-                    is_valid_aspect = 0.65 <= aspect <= 3.2
-                    is_floor_plane = (by + bh) >= frame_h * 0.20
+                    is_valid_aspect = 0.50 <= aspect <= 3.4
+                    is_floor_plane = (by + bh) >= frame_h * 0.15
                     if is_valid_aspect and is_floor_plane:
-                        calibrated_conf = min(0.95, max(0.80, round(0.76 + float(conf) * 0.40, 2)))
+                        calibrated_conf = min(0.96, max(0.82, round(0.78 + float(conf) * 0.35, 2)))
                     else:
                         calibrated_conf = round(float(conf), 2)
 
-                    raw_boxes.append([bx, by, bw, bh, calibrated_conf])
-
-            if raw_boxes:
-                boxes_xywh = [[b[0], b[1], b[2], b[3]] for b in raw_boxes]
-                confs = [b[4] for b in raw_boxes]
-                indices = cv2.dnn.NMSBoxes(boxes_xywh, confs, score_threshold=eff_conf, nms_threshold=0.35)
-
-                for idx in indices:
-                    i = int(idx)
-                    bx, by, bw, bh, conf = raw_boxes[i]
-
-                    # Scale back to original frame dimensions
-                    if scale != 1.0:
-                        obx = int(round(bx / scale))
-                        oby = int(round(by / scale))
-                        obw = int(round(bw / scale))
-                        obh = int(round(bh / scale))
-                    else:
-                        obx, oby, obw, obh = bx, by, bw, bh
-
-                    cx = obx + int(obw / 2)
-                    cy = oby + int(obh / 2)
-
-                    sub_crop = proc_frame[by : by + bh, bx : bx + bw]
-                    shape, shape_conf = _eval_subcrop_shape(sub_crop, bw, bh)
-
-                    candidates.append(
-                        CandidateTable(
-                            detection_id=f"DET-{det_counter:03d}",
-                            bbox=(obx, oby, obw, obh),
-                            center=(cx, cy),
-                            width=obw,
-                            height=obh,
-                            shape=shape,
-                            shape_confidence=max(shape_conf, 0.82),
-                            confidence=round(conf, 2),
-                        )
-                    )
-                    det_counter += 1
+                    raw_boxes.append([bx, by, bw, bh, calibrated_conf, None])
         except Exception as e:
-            logger.warning("YOLO candidate table detection error: %s", e)
+            logger.warning("YOLO candidate table detection fallback error: %s", e)
+            logger.warning("YOLO candidate table detection fallback error: %s", e)
+
+    if raw_boxes:
+        boxes_xywh = [[b[0], b[1], b[2], b[3]] for b in raw_boxes]
+        confs = [b[4] for b in raw_boxes]
+        indices = cv2.dnn.NMSBoxes(boxes_xywh, confs, score_threshold=eff_conf, nms_threshold=0.35)
+
+        for idx in indices:
+            i = int(idx)
+            bx, by, bw, bh, conf, poly_pts = raw_boxes[i]
+
+            if scale != 1.0:
+                obx = int(round(bx / scale))
+                oby = int(round(by / scale))
+                obw = int(round(bw / scale))
+                obh = int(round(bh / scale))
+                scaled_poly = (
+                    [[round(p[0] / scale, 2), round(p[1] / scale, 2)] for p in poly_pts]
+                    if poly_pts else None
+                )
+            else:
+                obx, oby, obw, obh = bx, by, bw, bh
+                scaled_poly = poly_pts
+
+            cx = obx + int(obw / 2)
+            cy = oby + int(obh / 2)
+
+            sub_crop = proc_frame[by : by + bh, bx : bx + bw]
+            shape, shape_conf = _eval_subcrop_shape(sub_crop, bw, bh)
+
+            candidates.append(
+                CandidateTable(
+                    detection_id=f"DET-{det_counter:03d}",
+                    bbox=(obx, oby, obw, obh),
+                    center=(cx, cy),
+                    width=obw,
+                    height=obh,
+                    shape=shape,
+                    shape_confidence=max(shape_conf, 0.82),
+                    confidence=round(conf, 2),
+                    polygon_points=scaled_poly,
+                )
+            )
+            det_counter += 1
 
     # ── Strategy 2: Seating Cluster & Patron Gathering Synthesis ─────────────
     existing_proc_boxes = []
@@ -351,62 +389,98 @@ def _eval_subcrop_shape(subcrop: np.ndarray, w: int, h: int) -> tuple[str, float
 
 
 def _detect_tabletop_contours(frame: np.ndarray, frame_w: int, frame_h: int, start_idx: int) -> list[CandidateTable]:
+    """
+    High-accuracy planar tabletop segmentation for indoor & outdoor restaurant patios.
+    Combines:
+      1. White/Light plastic and patio tabletop mask (high lightness, uniform saturation)
+      2. Dark wicker/wood tabletop mask
+      3. Canny edge morphology with relaxed perspective bounds
+      4. Oriented Bounding Box (OBB) angle and polygon calculation via minAreaRect
+    """
+    frame_area = frame_w * frame_h
+    results: list[CandidateTable] = []
+    idx = start_idx
+    existing_boxes: list[tuple[int, int, int, int]] = []
+
+    # 1. Color / Planar Mask Pass (HSV & Grayscale)
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.GaussianBlur(gray, (7, 7), 0)
-    edges = cv2.Canny(blurred, 30, 100)
+
+    # Bright / White patio tables (e.g. white plastic patio tables)
+    white_mask = cv2.inRange(hsv, np.array([0, 0, 140]), np.array([180, 80, 255]))
+    # Dark wicker / outdoor tables
+    dark_mask = cv2.inRange(hsv, np.array([0, 0, 15]), np.array([180, 255, 90]))
+    combined_mask = cv2.bitwise_or(white_mask, dark_mask)
+
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-    closed = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel, iterations=2)
+    opened = cv2.morphologyEx(combined_mask, cv2.MORPH_OPEN, kernel, iterations=1)
+    closed = cv2.morphologyEx(opened, cv2.MORPH_CLOSE, kernel, iterations=2)
 
     contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    results: list[CandidateTable] = []
-    frame_area = frame_w * frame_h
-    idx = start_idx
 
-    for cnt in contours:
+    # 2. Also run adaptive Canny edges
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    edges = cv2.Canny(blurred, 35, 110)
+    edges_closed = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel, iterations=2)
+    edge_contours, _ = cv2.findContours(edges_closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    all_contours = list(contours) + list(edge_contours)
+
+    for cnt in all_contours:
         area = cv2.contourArea(cnt)
-        # Skip small noise and skip anything taking up more than 22% of the camera view
-        if area < frame_area * 0.005 or area > frame_area * 0.22:
+        # Capture tables from 30x25 px (min area ~500 px) up to 25% of camera frame
+        if area < max(frame_area * 0.0006, 500) or area > frame_area * 0.25:
             continue
 
         x, y, w, h = cv2.boundingRect(cnt)
-        # Skip ceiling lights / overhead banners / signs in top 15% of camera frame
-        if y < frame_h * 0.15:
+        # Avoid upper 12% of frame (sky / overhead signs)
+        if y < frame_h * 0.12:
             continue
-        # Skip bottom camera bezel artifacts
-        if y + h > frame_h * 0.98 and h > frame_h * 0.5:
+        if w < 24 or h < 20:
             continue
-        if w < 35 or h < 35:
-            continue
-        # Tables don't occupy > 48% of the camera width or height
-        if w > frame_w * 0.48 or h > frame_h * 0.48:
+        if w > frame_w * 0.60 or h > frame_h * 0.60:
             continue
 
         aspect = w / max(float(h), 1.0)
-        # Skip long thin lines (walls, pipes, corridors)
-        if aspect < 0.35 or aspect > 2.8:
+        if aspect < 0.35 or aspect > 3.2:
             continue
 
         hull = cv2.convexHull(cnt)
         hull_area = cv2.contourArea(hull)
         solidity = area / max(hull_area, 1.0)
         fill_ratio = area / max(float(w * h), 1.0)
-        if solidity < 0.65 or fill_ratio < 0.35:
+        if solidity < 0.55 or fill_ratio < 0.30:
             continue
 
+        # Check overlap with existing detected tables in this pass
+        bbox = (x, y, w, h)
+        if _overlaps_any(bbox, existing_boxes, iou_thresh=0.35):
+            continue
+
+        # Compute Oriented Bounding Box (OBB) & rotation angle
+        rect = cv2.minAreaRect(cnt)
+        (rcx, rcy), (rw, rh), angle = rect
+        box_pts = cv2.boxPoints(rect)
+        poly_pts = [[round(float(p[0]), 2), round(float(p[1]), 2)] for p in box_pts]
+
         shape, shape_conf = estimate_table_shape(cnt, w, h)
-        conf = min(0.92, max(0.80, round(0.72 + solidity * 0.14 + fill_ratio * 0.08, 2)))
+        conf = min(0.94, max(0.80, round(0.74 + solidity * 0.12 + fill_ratio * 0.08, 2)))
+
         results.append(
             CandidateTable(
                 detection_id=f"DET-{idx:03d}",
-                bbox=(x, y, w, h),
+                bbox=bbox,
                 center=(x + int(w / 2), y + int(h / 2)),
                 width=w,
                 height=h,
                 shape=shape,
-                shape_confidence=max(shape_conf, 0.80),
+                shape_confidence=max(shape_conf, 0.82),
                 confidence=conf,
+                rotation=round(float(angle), 1),
+                polygon_points=poly_pts,
             )
         )
+        existing_boxes.append(bbox)
         idx += 1
 
     return results

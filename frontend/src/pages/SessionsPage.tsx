@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useFloor } from '../context/FloorContext'
 import { SessionCard } from '../components/sessions/SessionCard'
 import { EmptyState } from '../components/ui/EmptyState'
+import { Pagination } from '../components/ui/Pagination'
 
 type Filter = 'ACTIVE' | 'ALL' | 'CLOSED'
 
@@ -9,6 +10,10 @@ export function SessionsPage() {
   const { floor, sessions, loading, changeStatus, closeSession, refresh } = useFloor()
   const [filter, setFilter] = useState<Filter>('ACTIVE')
   const [search, setSearch] = useState('')
+
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(8)
 
   const filtered = useMemo(() => {
     let list = [...sessions].sort(
@@ -30,6 +35,16 @@ export function SessionsPage() {
     }
     return list
   }, [sessions, filter, search, floor?.tables])
+
+  // Reset page when filter or search changes
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [filter, search])
+
+  const paginatedSessions = useMemo(() => {
+    const start = (currentPage - 1) * pageSize
+    return filtered.slice(start, start + pageSize)
+  }, [filtered, currentPage, pageSize])
 
   const counts = useMemo(() => {
     const active = sessions.filter((s) => !['CLEANING', 'AVAILABLE'].includes(s.status)).length
@@ -103,23 +118,35 @@ export function SessionsPage() {
           message="Seat guests from the Floor plan page."
         />
       ) : (
-        <div className="sessions-list">
-          {filtered.map((session) => {
-            const table = floor?.tables.find((t) => t.id === session.tableId)
-            const section = table ? floor?.sections.find((s) => s.id === table.sectionId) : undefined
-            return (
-              <SessionCard
-                key={session.id}
-                session={session}
-                table={table}
-                sectionName={section?.name}
-                onAdvance={(tableId, status) => changeStatus(tableId, status)}
-                onRelease={closeSession}
-                onRefresh={refresh}
-              />
-            )
-          })}
-        </div>
+        <>
+          <div className="sessions-list">
+            {paginatedSessions.map((session) => {
+              const table = floor?.tables.find((t) => t.id === session.tableId)
+              const section = table ? floor?.sections.find((s) => s.id === table.sectionId) : undefined
+              return (
+                <SessionCard
+                  key={session.id}
+                  session={session}
+                  table={table}
+                  sectionName={section?.name}
+                  onAdvance={(tableId, status) => changeStatus(tableId, status)}
+                  onRelease={closeSession}
+                  onRefresh={refresh}
+                />
+              )
+            })}
+          </div>
+
+          <Pagination
+            currentPage={currentPage}
+            totalItems={filtered.length}
+            pageSize={pageSize}
+            onPageChange={setCurrentPage}
+            onPageSizeChange={setPageSize}
+            pageSizeOptions={[6, 8, 12, 24]}
+            itemName="sessions"
+          />
+        </>
       )}
     </div>
   )

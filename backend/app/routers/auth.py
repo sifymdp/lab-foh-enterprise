@@ -133,10 +133,10 @@ def calculate_user_effective_permissions(db: Session, user: User) -> list[str]:
     from app.models.role_permission import RolePermission
     from app.models.user_permission import UserPermission
     from app.models.temporary_permission import TemporaryPermission
-    from app.core.permissions import ALL_PERMISSIONS, ROLE_PERMISSIONS
+    from app.core.permissions import ALL_PERMISSIONS, ROLE_PERMISSIONS, normalize_role
     from sqlalchemy import func
     
-    role_name = user.role.upper()
+    role_name = normalize_role(user.role or "")
     if role_name == "OWNER":
         return sorted(list(ALL_PERMISSIONS))
         
@@ -153,14 +153,22 @@ def calculate_user_effective_permissions(db: Session, user: User) -> list[str]:
     direct_perms = db.query(UserPermission).filter(UserPermission.user_id == user.id).all()
     active_direct = {d.permission for d in direct_perms}
     
-    db_role = db.query(Role).filter(func.upper(Role.name) == role_name).first()
+    role_query = db.query(Role).filter(func.upper(Role.name) == role_name)
+    if user.tenant_id:
+        role_query = role_query.filter(Role.tenant_id == user.tenant_id)
+    db_role = role_query.first()
+
+    db_perms = set()
     if db_role:
         role_perms = db.query(RolePermission).filter(RolePermission.role_id == db_role.id).all()
-        active_role = {rp.permission for rp in role_perms}
-    else:
-        active_role = ROLE_PERMISSIONS.get(role_name, set())
+        db_perms = {rp.permission for rp in role_perms}
+
+    # Built-in standard roles retain their baseline catalogue permissions
+    base_perms = set()
+    if not db_role or not getattr(db_role, "is_custom", False):
+        base_perms = set(ROLE_PERMISSIONS.get(role_name, set()))
         
-    effective = active_role.union(active_direct).union(active_temp)
+    effective = base_perms.union(db_perms).union(active_direct).union(active_temp)
     return sorted(list(effective))
 
 

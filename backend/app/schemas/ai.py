@@ -60,11 +60,18 @@ class ChatRequest(CamelModel):
 
 
 class ChatAction(CamelModel):
-    tool: str
-    summary: str
-    ok: bool
+    tool: str | None = None
+    summary: str | None = None
+    ok: bool = True
+    type: str | None = None
+    route: str | None = None
+    filter: dict | None = None
+    table_ids: list[str] | None = None
 
 
 class ChatResponse(CamelModel):
     reply: str
     actions: list[ChatAction] = []
+    classification: str | None = None
+    intent: str | None = None
+    citations: list[dict] = []

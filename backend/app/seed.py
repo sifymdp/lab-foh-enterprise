@@ -805,6 +805,14 @@ def seed_database(db: Session) -> None:
 
     db.commit()
 
+    # Seed Enterprise RAG Standard Operating Procedures and all 17 Knowledge Domains
+    try:
+        from app.services.rag.domains import seed_all_enterprise_rag_domains
+        seed_all_enterprise_rag_domains(db, tenant_id=organization.id, branch_id=branch.id)
+    except Exception as rag_seed_err:
+        import logging
+        logging.getLogger(__name__).warning("Enterprise RAG seed skipped or error: %s", rag_seed_err)
+
 
 
 def empty_floor_layout(floor: Floor) -> None:

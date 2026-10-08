@@ -950,6 +950,88 @@ export const api = {
       body: JSON.stringify({ reason }),
     })
   },
+
+  // ── Pluggable Vision Model Management ──
+  getVisionModels(): Promise<any[]> {
+    if (USE_MOCK) return Promise.resolve([])
+    return apiFetch('/vision/models')
+  },
+
+  getUnregisteredModels(): Promise<any[]> {
+    if (USE_MOCK) return Promise.resolve([])
+    return apiFetch('/vision/models/unregistered')
+  },
+
+  registerVisionModel(payload: {
+    model_name: string
+    file_path: string
+    version?: string
+    architecture?: string
+    task?: string
+    class_map?: Record<string, string>
+    confidence_threshold?: number
+    image_size?: number
+    license?: string
+  }): Promise<any> {
+    if (USE_MOCK) return Promise.resolve({})
+    return apiFetch('/vision/models/register', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  },
+
+  validateVisionModel(modelId: string): Promise<any> {
+    if (USE_MOCK) return Promise.resolve({})
+    return apiFetch(`/vision/models/${modelId}/validate`, { method: 'POST' })
+  },
+
+  benchmarkVisionModel(
+    modelId: string,
+    payload: { video_source?: string; sample_frames?: number; run_500_frame_test?: boolean } = {}
+  ): Promise<any> {
+    if (USE_MOCK) return Promise.resolve({})
+    return apiFetch(`/vision/models/${modelId}/benchmark`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  },
+
+  startShadowEvaluation(modelId: string, cameraId: string = 'default'): Promise<any> {
+    if (USE_MOCK) return Promise.resolve({})
+    return apiFetch(`/vision/models/${modelId}/shadow/start`, {
+      method: 'POST',
+      body: JSON.stringify({ camera_id: cameraId }),
+    })
+  },
+
+  stopShadowEvaluation(modelId: string, cameraId: string = 'default'): Promise<any> {
+    if (USE_MOCK) return Promise.resolve({})
+    return apiFetch(`/vision/models/${modelId}/shadow/stop`, {
+      method: 'POST',
+      body: JSON.stringify({ camera_id: cameraId }),
+    })
+  },
+
+  getShadowStatus(cameraId: string = 'default'): Promise<any> {
+    if (USE_MOCK) return Promise.resolve({ is_active: false })
+    return apiFetch(`/vision/models/shadow/status?camera_id=${cameraId}`)
+  },
+
+  activateVisionModel(modelId: string, reason?: string): Promise<any> {
+    if (USE_MOCK) return Promise.resolve({})
+    return apiFetch(`/vision/models/${modelId}/activate`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    })
+  },
+
+  rollbackVisionModel(reason?: string): Promise<any> {
+    if (USE_MOCK) return Promise.resolve({})
+    return apiFetch('/vision/models/rollback', {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    })
+  },
 }
 
 

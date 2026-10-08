@@ -1,22 +1,75 @@
 import { useEffect, useRef, useState } from 'react'
-import { aiApi, type AIProviderStatus, type ChatAction, type ChatMessage } from '../../api/extensions'
+import { useNavigate } from 'react-router-dom'
+import { aiApi, type AIProviderStatus, type ChatAction, type ChatMessage, type RAGCitation } from '../../api/extensions'
+import { useAuth } from '../../context/AuthContext'
 import { useFloor } from '../../context/FloorContext'
 
 interface ChatEntry extends ChatMessage {
   actions?: ChatAction[]
   error?: boolean
+  citations?: RAGCitation[]
+  feedbackGiven?: 'HELPFUL' | 'UNHELPFUL' | 'INCORRECT'
 }
 
-const SUGGESTIONS = [
-  'Sent bill to T1',
-  'Which tables are free right now?',
-  'Mark T1 clean & available',
-  'Seat a party of 4',
-  "What are today's shift stats?",
+const getDomainBadgeStyle = (domain: string) => {
+  switch (domain.toUpperCase()) {
+    case 'RESTAURANT_SOP':
+      return { bg: '#eff6ff', color: '#1d4ed8' }
+    case 'CUSTOMER_EXPERIENCE':
+      return { bg: '#fef3c7', color: '#b45309' }
+    case 'KITCHEN':
+      return { bg: '#fee2e2', color: '#b91c1c' }
+    case 'TABLE_LIFECYCLE':
+      return { bg: '#e0f2fe', color: '#0369a1' }
+    case 'PREDICTIVE_OPERATIONS':
+      return { bg: '#f3e8ff', color: '#7e22ce' }
+    case 'MANAGER_DECISIONS':
+      return { bg: '#fce7f3', color: '#be185d' }
+    case 'MAINTENANCE':
+      return { bg: '#ffedd5', color: '#c2410c' }
+    case 'SUPPLIER_INVENTORY':
+      return { bg: '#ecfdf5', color: '#047857' }
+    case 'COMPLIANCE_SAFETY':
+      return { bg: '#fef9c3', color: '#a16207' }
+    case 'RESTAURANT_LAYOUT':
+      return { bg: '#e0e7ff', color: '#4338ca' }
+    case 'CROSS_BRANCH':
+      return { bg: '#ccfbf1', color: '#0f766e' }
+    case 'MENU':
+      return { bg: '#f0fdf4', color: '#15803d' }
+    default:
+      return { bg: '#f1f5f9', color: '#475569' }
+  }
+}
+
+const OWNER_SUGGESTIONS = [
+  "What is today's revenue?",
+  "What are customers complaining about most?",
+  "Why were kitchen orders delayed?",
+  "What should we prepare for tonight?",
+  "What problems has Table 12 had recently?",
+  "Have we solved a kitchen overload problem before?",
+  "Compare turnover across branches",
+  "Which tables are free right now?",
+]
+
+const OPERATIONAL_SUGGESTIONS = [
+  "What is the table cleaning SOP?",
+  "What are customers complaining about most?",
+  "Why were kitchen orders delayed?",
+  "What should we prepare for tonight?",
+  "What problems has Table 12 had recently?",
+  "What is the allergen procedure?",
+  "Why was Table 18 moved?",
+  "Which tables are free right now?",
 ]
 
 export function AIChatWidget() {
+  const navigate = useNavigate()
+  const { user } = useAuth()
   const { refresh } = useFloor()
+  const isOwner = user?.role === 'OWNER'
+  const suggestions = isOwner ? OWNER_SUGGESTIONS : OPERATIONAL_SUGGESTIONS
   const [open, setOpen] = useState(false)
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState<ChatEntry[]>([])
@@ -24,19 +77,39 @@ export function AIChatWidget() {
   const [providerStatus, setProviderStatus] = useState<AIProviderStatus | null>(null)
   const [showConfig, setShowConfig] = useState(false)
   const [apiKeyInput, setApiKeyInput] = useState('')
-  const [selectedProvider, setSelectedProvider] = useState<'groq' | 'gemini' | 'openai'>('groq')
+  const [selectedProvider, setSelectedProvider] = useState<'openrouter' | 'groq' | 'gemini' | 'openai'>('openrouter')
+  const [selectedModel, setSelectedModel] = useState('openai/gpt-4o-mini')
   const [savingKey, setSavingKey] = useState(false)
   const [configMessage, setConfigMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [openCitations, setOpenCitations] = useState<Record<number, boolean>>({})
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  const handleFeedback = async (index: number, type: 'HELPFUL' | 'UNHELPFUL') => {
+    setMessages((prev) =>
+      prev.map((m, i) => (i === index ? { ...m, feedbackGiven: type } : m))
+    )
+    try {
+      await aiApi.submitRAGFeedback(undefined, type)
+    } catch {
+      // optimistic state retained
+    }
+  }
 
   const loadProviderStatus = async () => {
     try {
       const status = await aiApi.getProviderStatus()
       setProviderStatus(status)
-      if (status.provider && (status.provider === 'groq' || status.provider === 'gemini' || status.provider === 'openai')) {
-        setSelectedProvider(status.provider)
+      if (status.provider) {
+        const p = status.provider.toLowerCase()
+        if (p.includes('openrouter')) setSelectedProvider('openrouter')
+        else if (p.includes('groq')) setSelectedProvider('groq')
+        else if (p.includes('gemini')) setSelectedProvider('gemini')
+        else if (p.includes('openai')) setSelectedProvider('openai')
+      }
+      if (status.model) {
+        setSelectedModel(status.model)
       }
     } catch {
       // Fallback if network or auth error
@@ -64,11 +137,12 @@ export function AIChatWidget() {
       const res = await aiApi.configureKey({
         provider: selectedProvider,
         api_key: apiKeyInput.trim(),
+        model: selectedProvider === 'openrouter' ? selectedModel : undefined,
       })
       setConfigMessage({ type: 'success', text: res.message || 'Key saved & activated!' })
       setApiKeyInput('')
       await loadProviderStatus()
-      setTimeout(() => setShowConfig(false), 1400)
+      setTimeout(() => setShowConfig(false), 1500)
     } catch (err) {
       setConfigMessage({
         type: 'error',
@@ -90,8 +164,19 @@ export function AIChatWidget() {
       const res = await aiApi.chat(history.map(({ role, content }) => ({ role, content })))
       setMessages((prev) => [
         ...prev,
-        { role: 'assistant', content: res.reply, actions: res.actions },
+        { role: 'assistant', content: res.reply, actions: res.actions, citations: res.citations },
       ])
+      // Execute any validated UI navigation actions
+      const navAction = res.actions?.find((a) => a.type === 'NAVIGATE' && a.route)
+      if (navAction?.route) {
+        let targetUrl = navAction.route
+        const qParams = navAction.filter || navAction.params
+        if (qParams && typeof qParams === 'object') {
+          const qs = new URLSearchParams(qParams as Record<string, string>).toString()
+          if (qs) targetUrl += `?${qs}`
+        }
+        navigate(targetUrl)
+      }
       if (res.actions?.some((a) => a.ok)) {
         // The assistant changed floor state — pull the fresh floor plan.
         void refresh()
@@ -258,15 +343,15 @@ export function AIChatWidget() {
               </p>
 
               <form onSubmit={handleSaveKey}>
-                <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-                  {(['groq', 'gemini', 'openai'] as const).map((prov) => (
+                <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+                  {(['openrouter', 'groq', 'gemini', 'openai'] as const).map((prov) => (
                     <button
                       key={prov}
                       type="button"
                       onClick={() => setSelectedProvider(prov)}
                       style={{
-                        flex: 1,
-                        padding: '4px 6px',
+                        flex: prov === 'openrouter' ? '1 1 100%' : '1 1 auto',
+                        padding: '5px 8px',
                         borderRadius: 6,
                         fontSize: 11,
                         fontWeight: 600,
@@ -277,10 +362,60 @@ export function AIChatWidget() {
                         color: selectedProvider === prov ? '#1d4ed8' : '#475569',
                       }}
                     >
-                      {prov === 'groq' ? 'Groq (Free)' : prov}
+                      {prov === 'openrouter' ? '⚡ OpenRouter (Recommended Gateway)' : prov === 'groq' ? 'Groq (Free)' : prov}
                     </button>
                   ))}
                 </div>
+
+                {selectedProvider === 'openrouter' && (
+                  <div style={{ marginBottom: 8 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: '#475569' }}>Selected Model:</span>
+                      <span style={{ fontSize: 10, color: '#64748b' }}>Multi-Model Gateway</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 4, marginBottom: 6, flexWrap: 'wrap' }}>
+                      {[
+                        { id: 'openai/gpt-4o-mini', label: 'GPT-4o Mini' },
+                        { id: 'anthropic/claude-3.5-haiku', label: 'Claude 3.5 Haiku' },
+                        { id: 'meta-llama/llama-3.3-70b-instruct', label: 'Llama 3.3 70B' },
+                      ].map((m) => (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onClick={() => setSelectedModel(m.id)}
+                          style={{
+                            padding: '3px 6px',
+                            borderRadius: 4,
+                            fontSize: 10.5,
+                            cursor: 'pointer',
+                            border: selectedModel === m.id ? '1px solid #2563eb' : '1px solid #cbd5e1',
+                            background: selectedModel === m.id ? '#dbeafe' : '#ffffff',
+                            color: selectedModel === m.id ? '#1e40af' : '#64748b',
+                          }}
+                        >
+                          {m.label}
+                        </button>
+                      ))}
+                    </div>
+                    <input
+                      aria-label="Model identifier"
+                      type="text"
+                      value={selectedModel}
+                      onChange={(e) => setSelectedModel(e.target.value)}
+                      placeholder="e.g. openai/gpt-4o-mini"
+                      style={{
+                        width: '100%',
+                        padding: '4px 8px',
+                        fontSize: 11,
+                        borderRadius: 6,
+                        border: '1px solid #cbd5e1',
+                        outline: 'none',
+                        marginBottom: 6,
+                        boxSizing: 'border-box',
+                      }}
+                    />
+                  </div>
+                )}
 
                 <div style={{ display: 'flex', gap: 6 }}>
                   <input
@@ -291,7 +426,9 @@ export function AIChatWidget() {
                     value={apiKeyInput}
                     onChange={(e) => setApiKeyInput(e.target.value)}
                     placeholder={
-                      selectedProvider === 'groq'
+                      selectedProvider === 'openrouter'
+                        ? 'sk-or-v1-...'
+                        : selectedProvider === 'groq'
                         ? 'gsk_...'
                         : selectedProvider === 'gemini'
                         ? 'AIzaSy...'
@@ -321,7 +458,7 @@ export function AIChatWidget() {
                       opacity: savingKey || !apiKeyInput.trim() ? 0.6 : 1,
                     }}
                   >
-                    {savingKey ? 'Saving…' : 'Activate'}
+                    {savingKey ? 'Saving…' : 'Save & Connect'}
                   </button>
                 </div>
               </form>
@@ -343,15 +480,33 @@ export function AIChatWidget() {
               )}
 
               <div style={{ marginTop: 6, fontSize: 11, color: '#94a3b8' }}>
-                Tip: Get a free high-speed Groq key at{' '}
-                <a
-                  href="https://console.groq.com/keys"
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ color: '#2563eb', textDecoration: 'underline' }}
-                >
-                  console.groq.com
-                </a>
+                {selectedProvider === 'openrouter' ? (
+                  <>
+                    Tip: Get your OpenRouter API key at{' '}
+                    <a
+                      href="https://openrouter.ai/keys"
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ color: '#2563eb', textDecoration: 'underline' }}
+                    >
+                      openrouter.ai/keys
+                    </a>
+                  </>
+                ) : selectedProvider === 'groq' ? (
+                  <>
+                    Tip: Get a free high-speed Groq key at{' '}
+                    <a
+                      href="https://console.groq.com/keys"
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ color: '#2563eb', textDecoration: 'underline' }}
+                    >
+                      console.groq.com
+                    </a>
+                  </>
+                ) : (
+                  'Tip: Enter a valid API key with model inference access.'
+                )}
               </div>
             </div>
           )}
@@ -381,7 +536,7 @@ export function AIChatWidget() {
                   Quick Actions
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  {SUGGESTIONS.map((s) => (
+                  {suggestions.map((s) => (
                     <button
                       key={s}
                       type="button"
@@ -446,6 +601,9 @@ export function AIChatWidget() {
                     {msg.actions.map((action, j) => (
                       <span
                         key={j}
+                        onClick={() => {
+                          if (action.route) navigate(action.route)
+                        }}
                         style={{
                           fontSize: 11.5,
                           padding: '4px 10px',
@@ -456,12 +614,122 @@ export function AIChatWidget() {
                           display: 'flex',
                           alignItems: 'center',
                           gap: 6,
+                          cursor: action.route ? 'pointer' : 'default',
                         }}
                       >
                         <span>{action.ok ? '✓' : '⚠'}</span>
                         <span>{action.summary}</span>
+                        {action.route && <span style={{ opacity: 0.7, fontSize: 10 }}>↗</span>}
                       </span>
                     ))}
+                  </div>
+                )}
+
+                {msg.role === 'assistant' && !msg.error && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6, maxWidth: '85%' }}>
+                    {/* Source Citations Accordion */}
+                    {msg.citations && msg.citations.length > 0 && (
+                      <div style={{ fontSize: 11.5 }}>
+                        <button
+                          type="button"
+                          onClick={() => setOpenCitations((p) => ({ ...p, [i]: !p[i] }))}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            background: '#f8fafc',
+                            border: '1px solid #e2e8f0',
+                            borderRadius: 6,
+                            padding: '3px 8px',
+                            color: '#475569',
+                            cursor: 'pointer',
+                            fontSize: 11,
+                            fontWeight: 500,
+                          }}
+                        >
+                          <span>📚</span>
+                          <span>{msg.citations.length} Grounded Source{msg.citations.length > 1 ? 's' : ''}</span>
+                          <span style={{ fontSize: 9 }}>{openCitations[i] ? '▲' : '▼'}</span>
+                        </button>
+                        {openCitations[i] && (
+                          <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            {msg.citations.map((c, idx) => (
+                              <div
+                                key={idx}
+                                style={{
+                                  background: '#ffffff',
+                                  border: '1px solid #cbd5e1',
+                                  borderRadius: 6,
+                                  padding: '6px 8px',
+                                  fontSize: 11,
+                                  boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+                                }}
+                              >
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+                                  <span style={{ fontWeight: 600, color: '#0f172a' }}>{c.title}</span>
+                                  <span
+                                    style={{
+                                      fontSize: 9.5,
+                                      padding: '1px 5px',
+                                      borderRadius: 4,
+                                      background: getDomainBadgeStyle(c.domain).bg,
+                                      color: getDomainBadgeStyle(c.domain).color,
+                                      fontWeight: 600,
+                                    }}
+                                  >
+                                    {c.domain}
+                                  </span>
+                                </div>
+                                <div style={{ color: '#475569', fontSize: 10.5, lineHeight: 1.35 }}>
+                                  {c.snippet}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Feedback Buttons */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: '#94a3b8' }}>
+                      {msg.feedbackGiven ? (
+                        <span style={{ color: '#16a34a', display: 'flex', alignItems: 'center', gap: 4 }}>
+                          ✓ Feedback recorded
+                        </span>
+                      ) : (
+                        <>
+                          <span style={{ fontSize: 10 }}>Helpful?</span>
+                          <button
+                            type="button"
+                            onClick={() => void handleFeedback(i, 'HELPFUL')}
+                            title="Helpful"
+                            style={{
+                              background: 'transparent',
+                              border: 'none',
+                              cursor: 'pointer',
+                              padding: '1px 3px',
+                              fontSize: 12,
+                            }}
+                          >
+                            👍
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleFeedback(i, 'UNHELPFUL')}
+                            title="Not helpful"
+                            style={{
+                              background: 'transparent',
+                              border: 'none',
+                              cursor: 'pointer',
+                              padding: '1px 3px',
+                              fontSize: 12,
+                            }}
+                          >
+                            👎
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>

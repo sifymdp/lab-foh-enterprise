@@ -1,5 +1,29 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type ProxyOptions } from 'vite'
 import react from '@vitejs/plugin-react'
+
+// SPA proxy option: allows browser page refresh / direct navigation to serve index.html (SPA)
+// while proxying API fetch calls to the FastAPI backend.
+const apiProxy: ProxyOptions = {
+  target: 'http://127.0.0.1:8000',
+  changeOrigin: true,
+  bypass: (req) => {
+    const accept = (req.headers.accept || '') as string
+    const secFetchDest = (req.headers['sec-fetch-dest'] || '') as string
+    // If the browser is requesting an HTML document (page refresh or direct URL visit),
+    // bypass proxy and return index.html for React Router to handle
+    if (accept.includes('text/html') || secFetchDest === 'document') {
+      return '/index.html'
+    }
+  },
+}
+
+const streamProxy: ProxyOptions = {
+  target: 'http://127.0.0.1:8000',
+  changeOrigin: true,
+  secure: false,
+  ws: false,
+  timeout: 0,
+}
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -8,39 +32,33 @@ export default defineConfig({
     host: true,
     port: 5173,
     proxy: {
-      '/auth': 'http://127.0.0.1:8000',
-      '/floors': 'http://127.0.0.1:8000',
-      '/tables': 'http://127.0.0.1:8000',
-      '/sessions': 'http://127.0.0.1:8000',
-      '/users': 'http://127.0.0.1:8000',
-      '/menu': 'http://127.0.0.1:8000',
-      '/reservations': 'http://127.0.0.1:8000',
-      '/orders': 'http://127.0.0.1:8000',
-      '/guest': 'http://127.0.0.1:8000',
-      '/billing': 'http://127.0.0.1:8000',
-      '/payments': 'http://127.0.0.1:8000',
-      '/cashier-shifts': 'http://127.0.0.1:8000',
-      '/refunds': 'http://127.0.0.1:8000',
-      '/revenue': 'http://127.0.0.1:8000',
-      '/settings': 'http://127.0.0.1:8000',
-      '/rbac': 'http://127.0.0.1:8000',
-      '/audit-logs': 'http://127.0.0.1:8000',
-      '/insights': 'http://127.0.0.1:8000',
-      '/vision': 'http://127.0.0.1:8000',
-      '/stream': {
-        target: 'http://127.0.0.1:8000',
-        changeOrigin: true,
-        secure: false,
-        ws: false,
-        timeout: 0,
-      },
-      '/health': 'http://127.0.0.1:8000',
-      '/ai': 'http://127.0.0.1:8000',
-      '/customer': 'http://127.0.0.1:8000',
-      '/ai-booking': 'http://127.0.0.1:8000',
-      '/ai-timeslot': 'http://127.0.0.1:8000',
-      '/ai-waitlist': 'http://127.0.0.1:8000',
-      '/voice': 'http://127.0.0.1:8000',
+      '/auth': apiProxy,
+      '/floors': apiProxy,
+      '/tables': apiProxy,
+      '/sessions': apiProxy,
+      '/users': apiProxy,
+      '/menu': apiProxy,
+      '/reservations': apiProxy,
+      '/orders': apiProxy,
+      '/guest': apiProxy,
+      '/billing': apiProxy,
+      '/payments': apiProxy,
+      '/cashier-shifts': apiProxy,
+      '/refunds': apiProxy,
+      '/revenue': apiProxy,
+      '/settings': apiProxy,
+      '/rbac': apiProxy,
+      '/audit-logs': apiProxy,
+      '/insights': apiProxy,
+      '/vision': apiProxy,
+      '/stream': streamProxy,
+      '/health': apiProxy,
+      '/ai': apiProxy,
+      '/customer': apiProxy,
+      '/ai-booking': apiProxy,
+      '/ai-timeslot': apiProxy,
+      '/ai-waitlist': apiProxy,
+      '/voice': apiProxy,
     },
   },
 })

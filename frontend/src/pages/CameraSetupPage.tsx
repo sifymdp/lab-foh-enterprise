@@ -3,6 +3,7 @@ import { api } from '../api/client'
 import { FloorPlanMiniMap } from '../components/floor/FloorPlanMiniMap'
 import { DigitalFloorPlanView } from '../components/floor/DigitalFloorPlanView'
 import { LiveStreamPlayer } from '../components/vision/LiveStreamPlayer'
+import { VisionModelManagementPanel } from '../components/vision/VisionModelManagementPanel'
 import { useFloor } from '../context/FloorContext'
 import { useSocket } from '../context/SocketContext'
 import type { RectBounds } from '../types'
@@ -141,6 +142,7 @@ export function CameraSetupPage() {
   const [telemetry, setTelemetry] = useState<any>({ model_name: 'YOLO11', ai_fps: 15.0, is_ready: true, device: 'CPU' })
   const [mismatches, setMismatches] = useState<MismatchItem[]>([])
   const [resolvingId, setResolvingId] = useState<string | null>(null)
+  const [showDetailedQueue, setShowDetailedQueue] = useState(false)
 
   // Camera & Video Sources
   const [cameras, setCameras] = useState<CameraItem[]>([])
@@ -171,6 +173,7 @@ export function CameraSetupPage() {
   const [reconstructMode, setReconstructMode] = useState<boolean>(true)
   const [clearingFloor, setClearingFloor] = useState<boolean>(false)
   const [reconstructing, setReconstructing] = useState<boolean>(false)
+  const [showSourceSettings, setShowSourceSettings] = useState<boolean>(false)
 
   // Snapshot & ROI Drawing
   const [snapshotUrl, setSnapshotUrl] = useState<string | null>(null)
@@ -641,6 +644,27 @@ export function CameraSetupPage() {
     }
   }
 
+  async function handleApproveAllSuggestions() {
+    if (!floor?.id) return
+    const pending = suggestions.filter((s) => s.status === 'PENDING')
+    if (pending.length === 0) {
+      alert('No pending candidate tables to approve.')
+      return
+    }
+    setApplyingApproved(true)
+    try {
+      await Promise.all(
+        pending.map((s) => api.actionFloorPlanSuggestion(s.id, { action: 'APPROVE' }))
+      )
+      setApplyResultBanner(`✓ Approved all ${pending.length} candidate tables! Click 'Make All Tables' to register them to the floor plan.`)
+      await loadSuggestions(floor.id)
+    } catch (err: any) {
+      alert(`Bulk approval failed: ${err.message}`)
+    } finally {
+      setApplyingApproved(false)
+    }
+  }
+
   async function handleApplyApprovedChanges() {
     if (!floor?.id) return
     const approvedIds = suggestions.filter((s) => s.status === 'APPROVED').map((s) => s.id)
@@ -968,30 +992,140 @@ export function CameraSetupPage() {
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════════
-          THE 6 EXPLICIT VIDEO INPUT MODES
+          COMPACT VIDEO INPUT CONTROLS & EXPANDABLE SETTINGS (TOP RIGHT BUTTON)
       ══════════════════════════════════════════════════════════════════════ */}
-      <div style={{ background: 'var(--bg-elevated, #ffffff)', border: '1px solid var(--border, #e2e8f0)', borderRadius: '12px', padding: '1.25rem', marginBottom: '1.25rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-          <div>
-            <strong style={{ fontSize: '0.92rem', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-muted, #64748b)' }}>
-              Select Video Input Mode & State
-            </strong>
-            <p className="muted" style={{ margin: '0.15rem 0 0', fontSize: '0.78rem' }}>
-              Choose a physical camera or offline demo mode to connect to the computer vision pipeline.
-            </p>
+      <div
+        style={{
+          background: 'var(--bg-elevated, #ffffff)',
+          border: '1px solid var(--border, #e2e8f0)',
+          borderRadius: '12px',
+          padding: showSourceSettings ? '1.25rem' : '0.75rem 1.25rem',
+          marginBottom: '1.25rem',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+          transition: 'all 0.25s ease',
+        }}
+      >
+        {/* Compact Summary Header Bar */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              <span style={{ fontSize: '1.3rem' }}>🎥</span>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <strong style={{ fontSize: '0.92rem', color: '#0f172a' }}>
+                    {activeMode.label}
+                  </strong>
+                  <span
+                    style={{
+                      fontSize: '0.7rem',
+                      background: sourceTestResult?.success ? '#dcfce7' : '#e0f2fe',
+                      color: sourceTestResult?.success ? '#166534' : '#0369a1',
+                      padding: '2px 8px',
+                      borderRadius: '4px',
+                      fontWeight: 700,
+                    }}
+                  >
+                    ● {sourceTestResult?.status || 'CONFIGURED'}
+                  </span>
+                </div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', maxWidth: '460px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  Stream Source: <code style={{ fontSize: '0.72rem' }}>{cameraUrl || activeMode.default_url}</code>
+                </div>
+              </div>
+            </div>
+
+            {sourceTestResult && (
+              <div style={{ fontSize: '0.75rem', display: 'flex', gap: '0.6rem', alignItems: 'center', background: 'var(--surface-2)', padding: '0.25rem 0.65rem', borderRadius: '6px', border: '1px solid var(--border)' }}>
+                <span>Res: {sourceTestResult.resolution || '1280x720'}</span>
+                <span>FPS: {sourceTestResult.fps || 24}</span>
+                <span>Latency: {sourceTestResult.latency_ms || 42}ms</span>
+              </div>
+            )}
           </div>
 
-          {sourceTestResult && (
-            <div style={{ fontSize: '0.8rem', display: 'flex', gap: '0.75rem', alignItems: 'center', background: 'var(--surface-2)', padding: '0.35rem 0.75rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
-              <span style={{ color: sourceTestResult.success ? '#16a34a' : '#dc2626', fontWeight: 700 }}>
-                ● {sourceTestResult.status}
-              </span>
-              <span>Res: {sourceTestResult.resolution || '1280x720'}</span>
-              <span>FPS: {sourceTestResult.fps || 24}</span>
-              <span>Latency: {sourceTestResult.latency_ms || 42}ms</span>
-            </div>
-          )}
+          {/* Right Corner Action Controls & Settings Button */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+            {!showSourceSettings && (
+              <>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={handleTestSource}
+                  disabled={testingSource}
+                  style={{ fontSize: '0.78rem', padding: '0.4rem 0.75rem' }}
+                >
+                  {testingSource ? 'Testing…' : '🔍 Test Link'}
+                </button>
+
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={handleTriggerFloorPlanDetection}
+                  disabled={aiDetecting}
+                  style={{
+                    fontSize: '0.8rem',
+                    padding: '0.4rem 0.95rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                    fontWeight: 700,
+                  }}
+                >
+                  {aiDetecting ? 'Analyzing…' : '✨ Re-Detect Layout'}
+                </button>
+              </>
+            )}
+
+            {/* The Settings Toggle Button in Right Corner */}
+            <button
+              type="button"
+              onClick={() => setShowSourceSettings((prev) => !prev)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.45rem',
+                fontSize: '0.84rem',
+                fontWeight: 700,
+                padding: '0.45rem 1.05rem',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                background: showSourceSettings ? '#f1f5f9' : 'linear-gradient(135deg, #1e293b, #0f172a)',
+                color: showSourceSettings ? '#0f172a' : '#ffffff',
+                border: showSourceSettings ? '1.5px solid #cbd5e1' : 'none',
+                boxShadow: showSourceSettings ? 'none' : '0 2px 6px rgba(15, 23, 42, 0.25)',
+              }}
+            >
+              <span>⚙️</span>
+              <span>{showSourceSettings ? 'Close Settings ✕' : 'Video Source Settings'}</span>
+              <span style={{ fontSize: '0.72rem', opacity: 0.8 }}>{showSourceSettings ? '▲' : '▼'}</span>
+            </button>
+          </div>
         </div>
+
+        {/* Expandable Settings Full Body */}
+        {showSourceSettings && (
+          <div style={{ marginTop: '1.25rem', paddingTop: '1.25rem', borderTop: '1px solid var(--border)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <div>
+                <strong style={{ fontSize: '0.92rem', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-muted, #64748b)' }}>
+                  Select Video Input Mode & State
+                </strong>
+                <p className="muted" style={{ margin: '0.15rem 0 0', fontSize: '0.78rem' }}>
+                  Choose a physical camera or offline demo mode to connect to the computer vision pipeline.
+                </p>
+              </div>
+
+              {sourceTestResult && (
+                <div style={{ fontSize: '0.8rem', display: 'flex', gap: '0.75rem', alignItems: 'center', background: 'var(--surface-2)', padding: '0.35rem 0.75rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                  <span style={{ color: sourceTestResult.success ? '#16a34a' : '#dc2626', fontWeight: 700 }}>
+                    ● {sourceTestResult.status}
+                  </span>
+                  <span>Res: {sourceTestResult.resolution || '1280x720'}</span>
+                  <span>FPS: {sourceTestResult.fps || 24}</span>
+                  <span>Latency: {sourceTestResult.latency_ms || 42}ms</span>
+                </div>
+              )}
+            </div>
 
         {/* 6 Explicit Mode Cards */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '0.75rem', marginBottom: '1rem' }}>
@@ -1317,6 +1451,8 @@ export function CameraSetupPage() {
           )}
         </div>
       </div>
+    )}
+  </div>
 
       {/* ══════════════════════════════════════════════════════════════════════
           TABS NAVIGATION
@@ -1328,7 +1464,7 @@ export function CameraSetupPage() {
           { id: 'rois', label: '🎯 Table ROI Zoning Studio' },
           { id: 'calibration', label: '📐 Camera Calibration' },
           { id: 'mismatches', label: '🚨 CCTV ↔ FOH Mismatches', badge: mismatches.length > 0 ? mismatches.length : null },
-          { id: 'benchmark', label: '📊 Model Benchmark (YOLO11 vs Table-State)' },
+          { id: 'benchmark', label: '🧠 AI Model Hub & Registry' },
         ].map((tab) => {
           const active = activeTab === tab.id
           return (
@@ -1527,24 +1663,35 @@ export function CameraSetupPage() {
                       setSelectedSuggestionId(id)
                       const s = suggestions.find((x) => x.id === id)
                       if (s?.existing_table_id) setSelectedTableId(s.existing_table_id)
-                      const el = document.getElementById(`suggestion-card-${id}`)
-                      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
                     }}
+                    onApproveSuggestion={(id) => handleSuggestionAction(id, 'APPROVE')}
+                    onRejectSuggestion={(id) => handleSuggestionAction(id, 'REJECT')}
+                    onIgnoreSuggestion={(id) => handleSuggestionAction(id, 'IGNORE')}
+                    onMakeSingleTable={(id) => handleMakeSingleTable(id)}
+                    onApproveAll={handleApproveAllSuggestions}
+                    onMakeAllTables={(replaceOld) => handleMakeAllTables(replaceOld ?? true)}
+                    isApplying={applyingApproved}
                   />
                 </div>
               )}
             </div>
           </div>
 
-          {/* AI Suggestions Review Feed */}
-          <div style={{ marginTop: '1.5rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+          {/* AI Suggestions Detailed Review Feed (Collapsible) */}
+          <div style={{ marginTop: '1.5rem', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '1rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: showDetailedQueue ? '1rem' : 0, flexWrap: 'wrap', gap: '0.75rem' }}>
               <div>
-                <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700 }}>
-                  Detected Candidate Tables & Manager Review Queue ({suggestions.length} Items)
+                <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>📋 Detailed Table Review Queue ({suggestions.length} Items)</span>
+                  <span style={{ fontSize: '0.72rem', background: '#dcfce7', color: '#166534', padding: '2px 8px', borderRadius: '6px', fontWeight: 700 }}>
+                    {approvedCount} Approved
+                  </span>
+                  <span style={{ fontSize: '0.72rem', background: '#fef3c7', color: '#92400e', padding: '2px 8px', borderRadius: '6px', fontWeight: 700 }}>
+                    {pendingCount} Pending
+                  </span>
                 </h3>
                 <span className="muted" style={{ fontSize: '0.8rem' }}>
-                  Authority Rule: Manager review & approval required before database commit
+                  Tip: You can now review, approve, deny, and commit all tables directly on the Digital Twin canvas above!
                 </span>
               </div>
 
@@ -1552,74 +1699,21 @@ export function CameraSetupPage() {
                 <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
                   <button
                     type="button"
-                    className="btn btn-success btn-sm"
-                    onClick={() => handleMakeAllTables(true)}
-                    disabled={applyingApproved}
-                    style={{
-                      background: '#16a34a',
-                      color: '#ffffff',
-                      border: 'none',
-                      borderRadius: '8px',
-                      padding: '0.45rem 1rem',
-                      fontWeight: 700,
-                      fontSize: '0.82rem',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.4rem',
-                    }}
-                  >
-                    {applyingApproved ? 'Making Tables…' : `⚡ Make All Tables (Clear Old Floor Plan)`}
-                  </button>
-
-                  <button
-                    type="button"
                     className="btn btn-secondary btn-sm"
-                    onClick={() => handleMakeAllTables(false)}
-                    disabled={applyingApproved}
-                    style={{
-                      borderRadius: '8px',
-                      padding: '0.45rem 0.85rem',
-                      fontWeight: 600,
-                      fontSize: '0.82rem',
-                      cursor: 'pointer',
-                    }}
+                    onClick={() => setShowDetailedQueue((prev) => !prev)}
+                    style={{ fontSize: '0.8rem', padding: '0.4rem 0.85rem', fontWeight: 600 }}
                   >
-                    {applyingApproved ? 'Updating…' : `🔄 Update & Keep Existing`}
-                  </button>
-
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    onClick={async () => {
-                      if (!floor?.id) return
-                      const camId = selectedCameraId || cameras[0]?.id || 'cam-t-1'
-                      try {
-                        const res = await api.getFloorPlanDrift(floor.id, camId)
-                        alert(res.alert || 'Floor plan drift checked')
-                      } catch (e: any) {
-                        alert(`Drift check: ${e.message}`)
-                      }
-                    }}
-                    style={{
-                      borderRadius: '8px',
-                      padding: '0.45rem 0.85rem',
-                      fontWeight: 600,
-                      fontSize: '0.82rem',
-                      border: '1px solid var(--border)',
-                    }}
-                  >
-                    🔍 Check Layout Drift
+                    {showDetailedQueue ? '▲ Hide Table Cards' : '▼ Expand Detailed Cards'}
                   </button>
                 </div>
               )}
             </div>
 
-            {suggestions.length === 0 ? (
+            {showDetailedQueue && suggestions.length === 0 ? (
               <div style={{ padding: '2.5rem', textAlign: 'center', background: 'var(--bg-elevated)', border: '1px dashed var(--border)', borderRadius: '12px', color: 'var(--text-muted)' }}>
                 Select a video mode above and click <strong>"⚡ Analyze Source & Perform Table Detection"</strong> to automatically discover and map tables.
               </div>
-            ) : (
+            ) : showDetailedQueue && (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: '1rem' }}>
                 {suggestions.map((s) => {
                   let cardClass = 'ai-candidate-card--matched'
@@ -2159,13 +2253,16 @@ export function CameraSetupPage() {
       )}
 
       {/* ══════════════════════════════════════════════════════════════════════
-          TAB 6: YOLO11 VS TABLE-STATE MODEL BENCHMARK
+          TAB 6: AI MODEL HUB & PLUGGABLE REGISTRY
       ══════════════════════════════════════════════════════════════════════ */}
       {activeTab === 'benchmark' && (
-        <div style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: '12px', padding: '1.5rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
-            <div>
-              <h3 style={{ margin: 0, fontSize: '1.1rem' }}>Vision Model Comparative Benchmark</h3>
+        <div>
+          <VisionModelManagementPanel cameraId={selectedCameraId || 'default'} />
+
+          <div style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: '12px', padding: '1.5rem', marginTop: '1.5rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.1rem' }}>Vision Model Comparative Benchmark</h3>
               <p className="muted" style={{ margin: '0.25rem 0 0', fontSize: '0.85rem' }}>
                 Measures Precision, Recall, mAP@0.5, FPS, latency, and error rates on available restaurant video clips.
               </p>
@@ -2230,6 +2327,7 @@ export function CameraSetupPage() {
             </div>
           )}
         </div>
+      </div>
       )}
     </div>
   )

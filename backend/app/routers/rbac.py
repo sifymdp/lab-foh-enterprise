@@ -205,11 +205,19 @@ def get_permissions_matrix(
     for perm in all_perms:
         mappings = {}
         for r in all_role_entries:
-            role_perm = db.query(RolePermission).filter(
-                RolePermission.role_id == r.id,
-                RolePermission.permission == perm
-            ).first()
-            has_perm = (role_perm is not None)
+            if r.name.upper() == "OWNER":
+                has_perm = True
+            else:
+                role_perm = db.query(RolePermission).filter(
+                    RolePermission.role_id == r.id,
+                    RolePermission.permission == perm
+                ).first()
+                if role_perm is not None:
+                    has_perm = True
+                elif not getattr(r, "is_custom", False):
+                    has_perm = perm in ROLE_PERMISSIONS.get(r.name.upper(), set())
+                else:
+                    has_perm = False
             mappings[r.name] = has_perm
             mappings[r.name.upper()] = has_perm
             mappings[r.name.lower()] = has_perm
@@ -235,7 +243,10 @@ def toggle_matrix_permission(
     if body.role_name.upper() == "OWNER":
         raise HTTPException(status_code=400, detail="Cannot strip permissions from Owner role")
         
-    role = db.query(Role).filter(func.upper(Role.name) == body.role_name.upper()).first()
+    role = db.query(Role).filter(
+        func.upper(Role.name) == body.role_name.upper(),
+        Role.tenant_id == user.tenant_id
+    ).first()
     if not role:
         raise HTTPException(status_code=404, detail="Role not found")
         

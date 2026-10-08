@@ -43,6 +43,7 @@ from app.routers import (
     ai_timeslot,
     ai_waitlist,
     voice,
+    rag,
 )
 from app.seed import seed_database
 from app.workers import camera_worker
@@ -176,6 +177,7 @@ app.include_router(ai_booking.router)
 app.include_router(ai_timeslot.router)
 app.include_router(ai_waitlist.router)
 app.include_router(voice.router)
+app.include_router(rag.router)
 
 
 

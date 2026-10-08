@@ -47,10 +47,27 @@ from app.models.vision import (
     VisionMismatch,
     VisionObservation,
 )
+from app.models.vision_model import (
+    VisionModelRecord,
+    VisionModelValidation,
+    VisionModelBenchmark,
+    VisionModelActivation,
+    VisionShadowMetric,
+)
 
 # Team Member Integrated Models
 from app.models.order_analytics import OrderAnalytics
 from app.models.customer import CustomerOTP, CustomerWaitlistEntry
+from app.models.ai_audit import AIAuditEvent
+
+# Enterprise RAG & Knowledge Models
+from app.models.rag import (
+    KnowledgeSource,
+    KnowledgeDocument,
+    KnowledgeChunk,
+    RAGQueryLog,
+    RAGFeedback,
+)
 
 __all__ = [
     "User",
@@ -97,8 +114,19 @@ __all__ = [
     "TableROI",
     "VisionObservation",
     "VisionMismatch",
+    "VisionModelRecord",
+    "VisionModelValidation",
+    "VisionModelBenchmark",
+    "VisionModelActivation",
+    "VisionShadowMetric",
     "OrderAnalytics",
     "CustomerOTP",
     "CustomerWaitlistEntry",
+    "AIAuditEvent",
+    "KnowledgeSource",
+    "KnowledgeDocument",
+    "KnowledgeChunk",
+    "RAGQueryLog",
+    "RAGFeedback",
 ]
 

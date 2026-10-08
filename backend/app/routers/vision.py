@@ -31,10 +31,23 @@ from app.models.vision import (
     VisionMismatch,
     VisionObservation,
 )
+from app.models.vision_model import (
+    VisionModelRecord,
+    VisionModelValidation,
+    VisionModelBenchmark,
+    VisionModelActivation,
+    VisionShadowMetric,
+)
 from app.services import calibration_service, floor_plan_ai_service
 from app.services.mismatch_service import mismatch_service
 from app.services.video_sources import video_source_manager
 from app.services.vision_benchmark_service import run_vision_benchmark
+from app.services.vision import (
+    model_registry,
+    lifecycle_service,
+    shadow_runner,
+    run_comparative_benchmark,
+)
 
 router = APIRouter(prefix="/vision", tags=["vision"])
 
@@ -881,14 +894,277 @@ def list_floor_plan_versions(
 def run_model_benchmark(
     payload: BenchmarkRunPayload,
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """
     Benchmark YOLO11 against custom table-state model on real restaurant footage.
     Measures Precision, Recall, mAP, FPS, inference latency, false positive/negative rates.
     """
-    require_permission("camera.configuration", current_user)
+    require_permission("camera.configuration", current_user, db)
     report = run_vision_benchmark(
         sample_frames=payload.sample_frames,
         video_filename=payload.video_source or "table_t-1.mp4",
     )
     return report
+
+
+# ── Pluggable Vision Model Management & Benchmarking Hub ──────────────────
+
+class ModelRegisterPayload(BaseModel):
+    model_name: str
+    file_path: str
+    version: str = "1.0"
+    architecture: str = "YOLO11"
+    task: str = "detect"
+    class_map: dict[str, str] | None = None
+    confidence_threshold: float = 0.35
+    image_size: int = 640
+    license: str | None = None
+    source_url: str | None = None
+    creator: str | None = None
+
+
+class ModelComparativeBenchmarkPayload(BaseModel):
+    video_source: str | None = None
+    sample_frames: int = 50
+    run_500_frame_test: bool = False
+
+
+class ModelPromotePayload(BaseModel):
+    reason: str | None = None
+
+
+class ModelRollbackPayload(BaseModel):
+    reason: str | None = None
+
+
+class ShadowTogglePayload(BaseModel):
+    camera_id: str = "default"
+
+
+@router.get("/models")
+def list_vision_models(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Lists all registered vision models in the registry."""
+    require_permission("camera.view", current_user, db)
+    models = db.query(VisionModelRecord).order_by(desc(VisionModelRecord.created_at)).all()
+    results = []
+    for m in models:
+        latest_val = m.validations[-1] if m.validations else None
+        latest_bm = m.benchmarks[-1] if m.benchmarks else None
+        results.append({
+            "id": m.id,
+            "model_name": m.model_name,
+            "version": m.version,
+            "architecture": m.architecture,
+            "task": m.task,
+            "role": m.role,
+            "status": m.status,
+            "validation_status": m.validation_status,
+            "is_active": m.is_active,
+            "file_path": m.file_path,
+            "file_size_bytes": m.file_size_bytes,
+            "file_hash": m.file_hash,
+            "confidence_threshold": m.confidence_threshold,
+            "image_size": m.image_size,
+            "license": m.license,
+            "creator": m.creator,
+            "created_at": m.created_at.isoformat() if m.created_at else None,
+            "latest_validation": {
+                "overall_status": latest_val.overall_status,
+                "tier1_status": latest_val.tier1_status,
+                "tier2_status": latest_val.tier2_status,
+                "tier2_latency_ms": latest_val.tier2_smoke_latency_ms,
+                "tier3_status": latest_val.tier3_status,
+            } if latest_val else None,
+            "latest_benchmark": {
+                "avg_latency_ms": latest_bm.avg_latency_ms,
+                "avg_fps": latest_bm.avg_fps,
+                "spatial_stability_score": latest_bm.spatial_stability_score,
+                "frames_evaluated": latest_bm.frames_evaluated,
+                "benchmark_type": latest_bm.benchmark_type,
+            } if latest_bm else None,
+        })
+    return results
+
+
+@router.get("/models/unregistered")
+def discover_unregistered_candidate_models(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Scans candidates directory for newly placed .pt model files that are not yet registered."""
+    require_permission("camera.configuration", current_user, db)
+    return model_registry.discover_candidate_files()
+
+
+@router.post("/models/register")
+def register_candidate_model(
+    payload: ModelRegisterPayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Registers an external or custom .pt model, runs 3-tier validation, and catalogs it."""
+    require_permission("camera.configuration", current_user, db)
+    class_map_converted = None
+    if payload.class_map:
+        try:
+            class_map_converted = {int(k): str(v) for k, v in payload.class_map.items()}
+        except Exception:
+            pass
+
+    try:
+        record = lifecycle_service.register_candidate_model(
+            db=db,
+            model_name=payload.model_name,
+            file_path=payload.file_path,
+            version=payload.version,
+            architecture=payload.architecture,
+            task=payload.task,
+            class_map=class_map_converted,
+            confidence_threshold=payload.confidence_threshold,
+            image_size=payload.image_size,
+            user_id=getattr(current_user, "id", None),
+        )
+        return {
+            "success": True,
+            "model_id": record.id,
+            "model_name": record.model_name,
+            "status": record.status,
+            "validation_status": record.validation_status,
+            "message": f"Model registered successfully with validation status: {record.validation_status}",
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/models/{model_id}/validate")
+def validate_model_endpoint(
+    model_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Triggers three-tier health validation (Level 1, Level 2, Level 3) for a model."""
+    require_permission("camera.configuration", current_user, db)
+    try:
+        report = lifecycle_service.validate_candidate_model(db, model_id)
+        return report
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/models/{model_id}/benchmark")
+def benchmark_candidate_model(
+    model_id: str,
+    payload: ModelComparativeBenchmarkPayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Executes comparative benchmark and 500-frame spatial consistency test on identical video input."""
+    require_permission("camera.configuration", current_user, db)
+    try:
+        report = run_comparative_benchmark(
+            candidate_model_id=model_id,
+            video_source=payload.video_source,
+            sample_frames_count=payload.sample_frames,
+            run_500_frame_test=payload.run_500_frame_test,
+            user_id=getattr(current_user, "id", None),
+        )
+        return report
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/models/{model_id}/shadow/start")
+def start_model_shadow_evaluation(
+    model_id: str,
+    payload: ShadowTogglePayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Starts dark-launch candidate evaluation on live CCTV stream."""
+    require_permission("camera.configuration", current_user, db)
+    started = shadow_runner.start_shadow_session(model_id=model_id, camera_id=payload.camera_id)
+    if not started:
+        raise HTTPException(status_code=400, detail="Could not start shadow session or already active.")
+    return {"success": True, "message": f"Shadow evaluation started for model '{model_id}'."}
+
+
+@router.post("/models/{model_id}/shadow/stop")
+def stop_model_shadow_evaluation(
+    model_id: str,
+    payload: ShadowTogglePayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Stops candidate shadow evaluation session."""
+    require_permission("camera.configuration", current_user, db)
+    shadow_runner.stop_shadow_session(camera_id=payload.camera_id)
+    return {"success": True, "message": "Shadow evaluation stopped."}
+
+
+@router.get("/models/shadow/status")
+def get_shadow_evaluation_status(
+    camera_id: str = "default",
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Returns active shadow evaluation telemetry."""
+    require_permission("camera.view", current_user, db)
+    telemetry = shadow_runner.get_shadow_telemetry(camera_id=camera_id)
+    return {"is_active": telemetry is not None and telemetry.get("is_running", False), "telemetry": telemetry}
+
+
+@router.post("/models/{model_id}/activate")
+def activate_model_endpoint(
+    model_id: str,
+    payload: ModelPromotePayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Atomically promotes a candidate model to production."""
+    require_permission("camera.configuration", current_user, db)
+    try:
+        record = lifecycle_service.activate_model(
+            db=db,
+            model_id=model_id,
+            user_id=getattr(current_user, "id", None),
+            reason=payload.reason,
+        )
+        return {
+            "success": True,
+            "model_id": record.id,
+            "model_name": record.model_name,
+            "status": record.status,
+            "message": f"Model '{record.model_name}' successfully promoted to production.",
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/models/rollback")
+def rollback_model_endpoint(
+    payload: ModelRollbackPayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Atomically reverts to the previous production model."""
+    require_permission("camera.configuration", current_user, db)
+    try:
+        record = lifecycle_service.rollback_model(
+            db=db,
+            user_id=getattr(current_user, "id", None),
+            reason=payload.reason,
+        )
+        return {
+            "success": True,
+            "model_id": record.id,
+            "model_name": record.model_name,
+            "status": record.status,
+            "message": f"Successfully rolled back to '{record.model_name}'.",
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+

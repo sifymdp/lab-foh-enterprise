@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { reservationsApi, type Reservation } from '../api/extensions'
 import { ReleaseCountdown } from '../components/reservations/ReleaseCountdown'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { EmptyState } from '../components/ui/EmptyState'
+import { Pagination } from '../components/ui/Pagination'
 import { humanizeApiError } from '../lib/apiErrors'
 import { useFloor } from '../context/FloorContext'
 
@@ -26,6 +27,17 @@ export function ReservationsPage() {
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const [releaseTarget, setReleaseTarget] = useState<{ id: string; guestName: string } | null>(null)
+
+  // Search & Filter & Pagination state
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState<string>('ALL')
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
+
+  // Reset page on search or filter change
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [search, statusFilter])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -92,6 +104,30 @@ export function ReservationsPage() {
     PENDING: '#1a73e8', SEATED: '#1e6b3c', RELEASED: '#888', CANCELLED: '#c00',
   }
 
+  const filteredReservations = useMemo(() => {
+    let list = [...reservations].sort(
+      (a, b) => new Date(a.reservedFor).getTime() - new Date(b.reservedFor).getTime(),
+    )
+    if (statusFilter !== 'ALL') {
+      list = list.filter((r) => r.status === statusFilter)
+    }
+    const q = search.trim().toLowerCase()
+    if (q) {
+      list = list.filter((r) => {
+        const table = floor?.tables.find((t) => t.id === r.tableId)
+        const tableNum = table?.number?.toLowerCase() ?? ''
+        const guest = r.guestName.toLowerCase()
+        return tableNum.includes(q) || guest.includes(q)
+      })
+    }
+    return list
+  }, [reservations, statusFilter, search, floor?.tables])
+
+  const paginatedReservations = useMemo(() => {
+    const start = (currentPage - 1) * pageSize
+    return filteredReservations.slice(start, start + pageSize)
+  }, [filteredReservations, currentPage, pageSize])
+
   const availableTables = floor?.tables.filter((t) =>
     t.status === 'AVAILABLE' || t.status === 'RESERVED'
   ) ?? []
@@ -134,13 +170,78 @@ export function ReservationsPage() {
         </div>
       )}
 
-      {reservations.length === 0 ? (
-        <EmptyState icon="📅" title="No upcoming reservations." message='Click "New reservation" to hold a table.' />
+      {/* Search & Filter Toolbar */}
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: '0.75rem',
+        marginBottom: '1rem',
+        background: 'var(--bg-elevated, #ffffff)',
+        padding: '0.75rem 1rem',
+        borderRadius: '10px',
+        border: '1px solid var(--border, #e2e8f0)',
+      }}>
+        <input
+          id="reservations-search-input"
+          name="reservationSearch"
+          aria-label="Search guest name or table"
+          type="search"
+          placeholder="Search guest or table #…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{
+            padding: '0.45rem 0.85rem',
+            borderRadius: '6px',
+            border: '1px solid var(--border, #cbd5e1)',
+            minWidth: '220px',
+            fontSize: '0.85rem',
+          }}
+        />
+
+        <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+          {[
+            ['ALL', 'All'],
+            ['PENDING', 'Pending'],
+            ['SEATED', 'Seated'],
+            ['RELEASED', 'Released'],
+            ['CANCELLED', 'Cancelled'],
+          ].map(([status, label]) => {
+            const isActive = statusFilter === status
+            return (
+              <button
+                key={status}
+                type="button"
+                onClick={() => setStatusFilter(status)}
+                style={{
+                  padding: '0.3rem 0.75rem',
+                  borderRadius: '6px',
+                  border: isActive ? 'none' : '1px solid var(--border, #cbd5e1)',
+                  background: isActive ? 'var(--primary, #2563eb)' : '#ffffff',
+                  color: isActive ? '#ffffff' : 'var(--text, #0f172a)',
+                  cursor: 'pointer',
+                  fontSize: '0.8rem',
+                  fontWeight: isActive ? 700 : 500,
+                }}
+              >
+                {label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {filteredReservations.length === 0 ? (
+        <EmptyState
+          icon="📅"
+          title={reservations.length === 0 ? 'No upcoming reservations.' : 'No reservations match your filter.'}
+          message={reservations.length === 0 ? 'Click "New reservation" to hold a table.' : 'Try adjusting your search query or filter.'}
+        />
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {[...reservations]
-            .sort((a, b) => new Date(a.reservedFor).getTime() - new Date(b.reservedFor).getTime())
-            .map((r) => {
+        <>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {paginatedReservations.map((r) => {
               const table = floor?.tables.find((t) => t.id === r.tableId)
               return (
                 <div key={r.id} style={{
@@ -187,7 +288,18 @@ export function ReservationsPage() {
                 </div>
               )
             })}
-        </div>
+          </div>
+
+          <Pagination
+            currentPage={currentPage}
+            totalItems={filteredReservations.length}
+            pageSize={pageSize}
+            onPageChange={setCurrentPage}
+            onPageSizeChange={setPageSize}
+            pageSizeOptions={[5, 10, 20, 50]}
+            itemName="reservations"
+          />
+        </>
       )}
 
       <ConfirmDialog

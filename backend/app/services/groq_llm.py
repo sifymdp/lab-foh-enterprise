@@ -26,7 +26,7 @@ def _lookup_env_keys() -> dict[str, str]:
     keys: dict[str, str] = {}
 
     # 1. Process environment and pydantic settings
-    for k in ("GROQ_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_API_KEY"):
+    for k in ("OPENROUTER_API_KEY", "GROQ_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_API_KEY"):
         val = (getattr(settings, k.lower(), None) or os.getenv(k) or "").strip()
         if val and not val.startswith("your_") and "your_api_key_here" not in val:
             keys[k] = val
@@ -52,7 +52,7 @@ def _lookup_env_keys() -> dict[str, str]:
                         name = name.strip()
                         val = val.strip().strip("'\"")
                         if (
-                            name in ("GROQ_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_API_KEY")
+                            name in ("OPENROUTER_API_KEY", "GROQ_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_API_KEY")
                             and val
                             and "your_api_key_here" not in val
                             and not val.startswith("your_")
@@ -67,11 +67,14 @@ def _lookup_env_keys() -> dict[str, str]:
 def save_api_key(provider: str, api_key: str, model: str | None = None) -> dict[str, Any]:
     """Persist an API key to backend/.env and update process settings immediately."""
     prov = provider.lower().strip()
-    key_name = "GROQ_API_KEY"
-    if "gemini" in prov or "google" in prov:
+    if "openrouter" in prov:
+        key_name = "OPENROUTER_API_KEY"
+    elif "gemini" in prov or "google" in prov:
         key_name = "GEMINI_API_KEY"
     elif "openai" in prov:
         key_name = "OPENAI_API_KEY"
+    else:
+        key_name = "GROQ_API_KEY"
 
     cleaned_key = api_key.strip()
     if not cleaned_key:
@@ -81,6 +84,18 @@ def save_api_key(provider: str, api_key: str, model: str | None = None) -> dict[
     os.environ[key_name] = cleaned_key
     if hasattr(settings, key_name.lower()):
         setattr(settings, key_name.lower(), cleaned_key)
+
+    if "openrouter" in prov:
+        os.environ["AI_PROVIDER"] = "openrouter"
+        setattr(settings, "ai_provider", "openrouter")
+        if model:
+            os.environ["AI_PRIMARY_MODEL"] = model.strip()
+            setattr(settings, "ai_primary_model", model.strip())
+        try:
+            from app.services.ai_agent.llm import model_router
+            model_router.openrouter.set_api_key(cleaned_key, model)
+        except Exception:
+            pass
 
     # Persist to backend/.env
     base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))

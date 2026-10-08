@@ -335,17 +335,44 @@ export interface AIEvent {
 export interface SeatingResponse { suggestion: string; partySize: number }
 export interface ShiftReport { reportDate: string; content: string; stats: Record<string, unknown> }
 export interface ChatMessage { role: 'user' | 'assistant'; content: string }
-export interface ChatAction { tool: string; summary: string; ok: boolean }
-export interface ChatResponse { reply: string; aiGenerated?: boolean; actions?: ChatAction[] }
+export interface ChatAction {
+  tool?: string
+  summary?: string
+  ok?: boolean
+  type?: 'NAVIGATE' | 'SET_FILTER' | 'SET_DATE_RANGE' | 'FOCUS_TABLES' | 'FOCUS_METRIC' | 'CONFIRM' | string
+  route?: string
+  filter?: Record<string, any>
+  params?: Record<string, any>
+  table_ids?: string[]
+  metric?: string
+}
+export interface RAGCitation {
+  id: string
+  title: string
+  domain: string
+  snippet: string
+  confidence: number
+}
+
+export interface ChatResponse {
+  reply: string
+  aiGenerated?: boolean
+  actions?: ChatAction[]
+  classification?: string
+  intent?: string
+  citations?: RAGCitation[]
+}
 
 export interface AIProviderStatus {
   connected: boolean
   provider: string | null
   model: string | null
+  multi_model_ready?: boolean
   available_providers?: {
-    groq: boolean
-    gemini: boolean
-    openai: boolean
+    openrouter?: boolean
+    groq?: boolean
+    gemini?: boolean
+    openai?: boolean
   }
 }
 
@@ -378,6 +405,12 @@ export const aiApi = {
       method: 'POST', body: JSON.stringify({ message: input, history }),
     })
   },
+  submitRAGFeedback: (queryLogId: string | undefined, feedbackType: 'HELPFUL' | 'UNHELPFUL' | 'INCORRECT', notes?: string) =>
+    apiFetch<{ status: string; feedback_id: string }>('/rag/feedback', {
+      method: 'POST',
+      body: JSON.stringify({ query_log_id: queryLogId, feedback_type: feedbackType, notes }),
+    }),
+  getRAGHealth: () => apiFetch<{ status: string; backend: string; total_documents: number; total_chunks: number }>('/rag/health'),
 }
 
 // ─── Loss Prevention ──────────────────────────────────────────────────────────

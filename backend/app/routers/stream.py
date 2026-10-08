@@ -212,7 +212,16 @@ def _draw_stream_overlays(
             # Vibrant Blue for Candidate New Table (BGR: 235, 160, 30)
             roi_color = (235, 160, 30)
             label = f"Cand T{idx + 1} [{cand_shape}] {int(cand_conf * 100)}%"
-            cv2.rectangle(frame, (ox, oy), (ox + ow, oy + oh), roi_color, 2)
+            poly_pts = getattr(cand, "polygon_points", None) or (cand.get("polygon_points") if isinstance(cand, dict) else None)
+            if poly_pts and len(poly_pts) >= 4:
+                pts_scaled = np.array([
+                    [int(round(p[0] * scale_x)), int(round(p[1] * scale_y))]
+                    for p in poly_pts
+                ], np.int32).reshape((-1, 1, 2))
+                cv2.polylines(frame, [pts_scaled], isClosed=True, color=roi_color, thickness=2)
+            else:
+                cv2.rectangle(frame, (ox, oy), (ox + ow, oy + oh), roi_color, 2)
+
             (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.40, 1)
             cv2.rectangle(frame, (ox, max(oy - th - 6, 0)), (ox + tw + 8, oy), roi_color, -1)
             cv2.putText(
@@ -289,14 +298,15 @@ def _ai_inference_worker(state: StreamWorkerState) -> None:
         try:
             cached_rois = _get_rois_for_floor(state.floor_id)
 
-            # Periodically scan for candidate tables in the background (every 8s, max 15 solid tables)
+            # Periodically scan for candidate tables in the background (frequent on startup, then periodic)
             now = time.time()
-            if now - last_candidate_check >= 8.0 or not state.latest_candidate_tables:
+            interval = 3.5 if len(state.latest_candidate_tables) < 2 else 8.0
+            if now - last_candidate_check >= interval or not state.latest_candidate_tables:
                 last_candidate_check = now
                 try:
-                    cands = table_detector.detect_candidate_tables(frame_to_process, min_confidence=0.40)
+                    cands = table_detector.detect_candidate_tables(frame_to_process, min_confidence=0.15)
                     if cands:
-                        cands = sorted(cands, key=lambda c: getattr(c, "confidence", 0), reverse=True)[:15]
+                        cands = sorted(cands, key=lambda c: getattr(c, "confidence", 0), reverse=True)[:18]
                     with state.lock:
                         state.latest_candidate_tables = cands
                 except Exception as cand_err:
@@ -314,6 +324,14 @@ def _ai_inference_worker(state: StreamWorkerState) -> None:
                 state.latest_table_matches = res.table_matches
                 state.inference_ms = res.inference_time_ms
                 state.ai_fps = res.fps
+
+            # Shadow candidate evaluation hook (strictly isolated, zero FOH mutation)
+            try:
+                from app.services.vision.benchmarking.shadow_runner import shadow_runner
+                if shadow_runner.is_shadow_active(state.floor_id):
+                    shadow_runner.on_frame(frame_to_process, camera_id=state.floor_id)
+            except Exception:
+                pass
 
             # Update temporal occupancy tracker for each table ROI
             for roi in cached_rois:

@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import { api } from '../api/client'
 import type { AuditLog } from '../types'
+import { Pagination } from '../components/ui/Pagination'
 
 const ACTION_COLORS: Record<string, { bg: string; text: string; icon: string }> = {
   LOGIN_SUCCESS:               { bg: '#dcfce7', text: '#16a34a', icon: '🔑' },
@@ -34,6 +35,10 @@ export function AuditLogsPage() {
 
   // Detail Modal for specific record
   const [selectedRecord, setSelectedRecord] = useState<AuditLog | null>(null)
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
 
   // Format Date as local YYYY-MM-DDTHH:mm (no UTC shift)
   const toLocalStr = (d: Date) => {
@@ -138,6 +143,16 @@ export function AuditLogsPage() {
       )
     })
   }, [logs, search])
+
+  // Reset pagination on filter or search changes
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [search, actionFilter, resourceFilter, startDate, endDate, datePreset])
+
+  const paginatedLogs = useMemo(() => {
+    const start = (currentPage - 1) * pageSize
+    return filteredLogs.slice(start, start + pageSize)
+  }, [filteredLogs, currentPage, pageSize])
 
   // Export filtered logs to CSV
   const handleExportCSV = () => {
@@ -390,7 +405,7 @@ export function AuditLogsPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredLogs.map((log) => {
+                {paginatedLogs.map((log) => {
                   const actionStyle = ACTION_COLORS[log.action] ?? { bg: '#f3f4f6', text: '#374151', icon: '📝' }
                   const formattedDate = new Date(log.createdAt)
 
@@ -504,6 +519,18 @@ export function AuditLogsPage() {
               </tbody>
             </table>
           </div>
+        )}
+
+        {filteredLogs.length > 0 && (
+          <Pagination
+            currentPage={currentPage}
+            totalItems={filteredLogs.length}
+            pageSize={pageSize}
+            onPageChange={setCurrentPage}
+            onPageSizeChange={setPageSize}
+            pageSizeOptions={[15, 25, 50, 100]}
+            itemName="audit logs"
+          />
         )}
       </div>
 
