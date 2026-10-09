@@ -12,7 +12,10 @@ is_sqlite = settings.database_url.startswith("sqlite")
 
 if is_sqlite:
     engine_kwargs = {
-        "connect_args": {"check_same_thread": False},
+        "connect_args": {
+            "check_same_thread": False,
+            "timeout": 30.0,
+        },
     }
 else:
     # PostgreSQL with psycopg / psycopg2 connection pool
@@ -24,6 +27,18 @@ else:
     }
 
 engine = create_engine(settings.database_url, **engine_kwargs)
+
+if is_sqlite:
+    from sqlalchemy import event
+
+    @event.listens_for(engine, "connect")
+    def set_sqlite_pragma(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute("PRAGMA busy_timeout=15000")
+        cursor.close()
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 

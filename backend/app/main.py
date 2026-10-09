@@ -84,8 +84,8 @@ async def lifespan(_app: FastAPI):
     # ── Graceful shutdown ──
     alert_task.cancel()
     try:
-        await alert_task
-    except (asyncio.CancelledError, Exception):
+        await asyncio.wait_for(alert_task, timeout=1.0)
+    except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
         pass
     # Stop stream workers first to prevent CancelledError cascades
     # from active StreamingResponse connections during shutdown.
@@ -94,7 +94,7 @@ async def lifespan(_app: FastAPI):
     except Exception:
         pass
     try:
-        await camera_worker.stop_worker()
+        await asyncio.wait_for(camera_worker.stop_worker(), timeout=2.0)
     except Exception:
         pass
     try:

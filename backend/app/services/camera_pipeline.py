@@ -316,7 +316,7 @@ def _apply_no_camera_tick(db: Session, table: Table, now: datetime) -> None:
         table.dirty_alert_sent = True
 
 
-def _scan_tables(db: Session) -> None:
+def _scan_tables(db: Session, stop_event: Any = None) -> None:
     """One periodic decision tick over every table the camera has a job for.
     Combines table-state cleanliness detection with YOLO11 ByteTrack person tracking
     and CCTV ↔ FOH status mismatch detection.
@@ -343,6 +343,10 @@ def _scan_tables(db: Session) -> None:
     cam_by_url = {c.stream_url: c for c in cameras}
 
     for table in tables:
+        if stop_event and stop_event.is_set():
+            logger.debug("Camera scan aborted due to shutdown event.")
+            return
+
         roi = camera_utils.parse_roi(table.roi_coords)
 
         if not table.camera_url or roi is None:
@@ -419,8 +423,8 @@ def _scan_tables(db: Session) -> None:
         _emit_table_updated(table)
 
 
-async def run_scan_cycle(db: Session) -> None:
+async def run_scan_cycle(db: Session, stop_event: Any = None) -> None:
     """Run one periodic camera scan without blocking the event loop."""
     started = datetime.now(timezone.utc)
-    await asyncio.to_thread(_scan_tables, db)
+    await asyncio.to_thread(_scan_tables, db, stop_event)
     logger.debug("Camera pipeline scan cycle finished in %.2fs", (datetime.now(timezone.utc) - started).total_seconds())

@@ -113,11 +113,19 @@ def _get_capture(source: str) -> cv2.VideoCapture | None:
 
 def release_captures() -> None:
     """Close cached captures (called on shutdown)."""
-    with _capture_lock:
-        for cap in _capture_cache.values():
-            cap.release()
+    acquired = _capture_lock.acquire(timeout=1.0)
+    if not acquired:
+        return
+    try:
+        for cap in list(_capture_cache.values()):
+            try:
+                cap.release()
+            except Exception:
+                pass
         _capture_cache.clear()
         _playback_started.clear()
+    finally:
+        _capture_lock.release()
 
 
 def _seek_to_wall_clock(cap: cv2.VideoCapture, source: str) -> None:
