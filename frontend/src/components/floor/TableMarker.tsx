@@ -11,6 +11,15 @@ export interface TableReservationInfo {
   reservedFor: string
 }
 
+export interface TableTwinOverlayData {
+  durationMinutes?: number
+  hasBottleneck?: boolean
+  activeOrders?: number
+  visionConfidence?: number
+  detectedPeople?: number
+  hasMismatch?: boolean
+}
+
 interface TableMarkerProps {
   table: Table
   session?: DiningSession
@@ -21,6 +30,7 @@ interface TableMarkerProps {
   isHighlighted?: boolean
   isDimmed?: boolean
   pendingOrdersCount?: number
+  twinData?: TableTwinOverlayData
   selected: boolean
   editable: boolean
   onSelect: (id: string) => void
@@ -37,6 +47,7 @@ export function TableMarker({
   isHighlighted,
   isDimmed,
   pendingOrdersCount,
+  twinData,
   selected,
   editable,
   onSelect,
@@ -156,6 +167,33 @@ export function TableMarker({
           }}
         >
           🧾 BILLING
+        </span>
+      )}
+      {twinData && (
+        <span className="table-marker-twin-overlay">
+          {twinData.durationMinutes !== undefined && twinData.durationMinutes > 0 && (
+            <span
+              className={`twin-duration-pill ${twinData.durationMinutes > 80 ? 'twin-duration-pill--warning' : ''}`}
+              title={`Seated for ${twinData.durationMinutes} mins`}
+            >
+              ⏱️{twinData.durationMinutes}m
+            </span>
+          )}
+          {twinData.hasBottleneck && (
+            <span className="twin-kitchen-badge" title="Kitchen prep delay/bottleneck">
+              🔥
+            </span>
+          )}
+          {twinData.hasMismatch && (
+            <span style={{ fontSize: '11px' }} title="CCTV status discrepancy detected">
+              🚨
+            </span>
+          )}
+        </span>
+      )}
+      {twinData?.visionConfidence !== undefined && (
+        <span className="twin-vision-confidence" title="Computer Vision observation confidence">
+          👁️ {Math.round(twinData.visionConfidence * 100)}% ({twinData.detectedPeople || 0}p)
         </span>
       )}
       {isCalling && (

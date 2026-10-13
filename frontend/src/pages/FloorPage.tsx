@@ -18,6 +18,10 @@ import { TableDetailPanel } from '../components/floor/TableDetailPanel'
 import { SeatGuestModal } from '../components/floor/SeatGuestModal'
 import { TakeOrderModal } from '../components/floor/TakeOrderModal'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
+import { DigitalTwinOverlayControl, type DigitalTwinOverlaySettings } from '../components/floor/DigitalTwinOverlayControl'
+import { DigitalTwinReplayModal } from '../components/floor/DigitalTwinReplayModal'
+import { DigitalTwinSimulationModal } from '../components/floor/DigitalTwinSimulationModal'
+import { IsometricFloorPlanView } from '../components/floor/IsometricFloorPlanView'
 import type { Floor, FloorLabelKind, RectBounds, Table, TableStatus } from '../types'
 
 export function FloorPage() {
@@ -44,6 +48,56 @@ export function FloorPage() {
   const [mismatches, setMismatches] = useState<any[]>([])
   const [activeMismatchModal, setActiveMismatchModal] = useState<any | null>(null)
   const [showLiveStream, setShowLiveStream] = useState(false)
+
+  // ── Digital Twin State & Telemetry ──
+  const [isTwinMode, setIsTwinMode] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('foh_twin_mode') === 'true'
+    } catch {
+      return false
+    }
+  })
+  const [twinOverlaySettings, setTwinOverlaySettings] = useState<DigitalTwinOverlaySettings>({
+    showOccupancy: true,
+    showKitchen: true,
+    showVision: true,
+    showDiscrepancies: true,
+  })
+  const [twinSnapshot, setTwinSnapshot] = useState<any | null>(null)
+  const [twinViewMode, setTwinViewMode] = useState<'2D' | '3D'>('2D')
+  const [showReplayModal, setShowReplayModal] = useState(false)
+  const [showSimulationModal, setShowSimulationModal] = useState(false)
+  const [showTwinOverlays, setShowTwinOverlays] = useState(false)
+
+  const fetchTwinSnapshot = useCallback(() => {
+    if (!floor?.id || !isTwinMode) return
+    import('../api/client').then(({ api }) => {
+      api.getDigitalTwinSnapshot(floor.id).then(setTwinSnapshot).catch(() => {})
+    })
+  }, [floor?.id, isTwinMode])
+
+  useEffect(() => {
+    fetchTwinSnapshot()
+    if (!isTwinMode) return
+    const timer = setInterval(fetchTwinSnapshot, 15000)
+    return () => clearInterval(timer)
+  }, [fetchTwinSnapshot, isTwinMode])
+
+  const twinOverlayMap = useMemo(() => {
+    if (!isTwinMode || !twinSnapshot?.tables) return {}
+    const map: Record<string, import('../components/floor/TableMarker').TableTwinOverlayData> = {}
+    twinSnapshot.tables.forEach((t: any) => {
+      map[t.id] = {
+        durationMinutes: twinOverlaySettings.showOccupancy ? t.occupancy?.duration_minutes : undefined,
+        hasBottleneck: twinOverlaySettings.showKitchen ? t.kitchen?.has_bottleneck : false,
+        activeOrders: twinOverlaySettings.showKitchen ? t.kitchen?.active_orders_count : 0,
+        visionConfidence: twinOverlaySettings.showVision && t.vision ? t.vision.confidence : undefined,
+        detectedPeople: twinOverlaySettings.showVision && t.vision ? t.vision.detected_people : 0,
+        hasMismatch: twinOverlaySettings.showDiscrepancies ? Boolean(t.discrepancy) : false,
+      }
+    })
+    return map
+  }, [isTwinMode, twinSnapshot, twinOverlaySettings])
 
   const editable = user ? canEditFloor(user.role) : false
   const isHost = user?.role === 'HOST'
@@ -517,7 +571,7 @@ export function FloorPage() {
 
       {/* ── Floor Display Canvas & Controls ── */}
       <div
-        className={`floor-display-wrapper ${isFullscreen ? 'floor-display-wrapper--fullscreen' : ''}`}
+        className={`floor-display-wrapper ${isFullscreen ? 'floor-display-wrapper--fullscreen' : ''} ${isTwinMode ? 'floor-display-wrapper--twin-mode' : ''}`}
         ref={floorDisplayRef}
       >
         <div className="floor-legend-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
@@ -534,84 +588,170 @@ export function FloorPage() {
             )}
           </div>
 
-          {/* Fullscreen Button matching Image 1 */}
-          {/* Live Stream Toggle (visible in fullscreen) */}
-          {isFullscreen && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            {/* Digital Twin Mode Toggle Button */}
             <button
               type="button"
-              className={`floor-fullscreen-btn ${showLiveStream ? 'floor-fullscreen-btn--active' : ''}`}
+              className={`btn-twin-toggle ${isTwinMode ? 'btn-twin-toggle--active' : ''}`}
               onClick={() => {
-                if (!selectedTable && floor.tables.length > 0) {
-                  setSelection({ type: 'table', id: floor.tables[0].id })
-                  setShowLiveStream(true)
-                } else {
-                  setShowLiveStream((v) => !v)
-                }
+                setIsTwinMode((prev) => {
+                  const next = !prev
+                  try {
+                    localStorage.setItem('foh_twin_mode', String(next))
+                  } catch {}
+                  return next
+                })
               }}
-              title={showLiveStream ? 'Hide Live Stream' : 'Show Live Stream'}
+              title="Toggle Restaurant Digital Twin live operational HUD telemetry mode"
+            >
+              <span style={{ fontSize: '1rem' }}>🌐</span>
+              <span>{isTwinMode ? 'Digital Twin: ACTIVE' : 'Digital Twin: OFF'}</span>
+              {isTwinMode && <span className="twin-pulse-dot" />}
+            </button>
+
+            {/* 2D vs 3D Isometric View Switcher (when Twin Mode is active) */}
+            {isTwinMode && (
+              <div className="twin-view-mode-toggle">
+                <button
+                  type="button"
+                  className={`twin-view-mode-btn ${twinViewMode === '2D' ? 'twin-view-mode-btn--active' : ''}`}
+                  onClick={() => setTwinViewMode('2D')}
+                  title="2D Top-Down Floor Canvas"
+                >
+                  🗺️ 2D
+                </button>
+                <button
+                  type="button"
+                  className={`twin-view-mode-btn ${twinViewMode === '3D' ? 'twin-view-mode-btn--active' : ''}`}
+                  onClick={() => setTwinViewMode('3D')}
+                  title="3D Isometric Digital Twin View"
+                >
+                  🧊 3D Twin
+                </button>
+                <button
+                  type="button"
+                  className={`twin-view-mode-btn ${showTwinOverlays ? 'twin-view-mode-btn--active' : ''}`}
+                  onClick={() => setShowTwinOverlays((v) => !v)}
+                  title={showTwinOverlays ? 'Hide Telemetry & Overlays' : 'Show Telemetry & Overlays'}
+                  style={showTwinOverlays ? { background: '#0284c7', color: '#fff', borderColor: '#0284c7' } : {}}
+                >
+                  📊 {showTwinOverlays ? 'Hide Overlays' : 'Overlays'}
+                </button>
+              </div>
+            )}
+
+            {/* Live Stream Toggle (visible in fullscreen) */}
+            {isFullscreen && (
+              <button
+                type="button"
+                className={`floor-fullscreen-btn ${showLiveStream ? 'floor-fullscreen-btn--active' : ''}`}
+                onClick={() => {
+                  if (!selectedTable && floor.tables.length > 0) {
+                    setSelection({ type: 'table', id: floor.tables[0].id })
+                    setShowLiveStream(true)
+                  } else {
+                    setShowLiveStream((v) => !v)
+                  }
+                }}
+                title={showLiveStream ? 'Hide Live Stream' : 'Show Live Stream'}
+              >
+                <svg
+                  width="17"
+                  height="17"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke={showLiveStream ? '#1d4ed8' : 'currentColor'}
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  style={{ flexShrink: 0 }}
+                >
+                  <path d="M23 7l-7 5 7 5V7z" />
+                  <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+                </svg>
+                <span>{showLiveStream ? 'Hide Stream' : 'Live Stream'}</span>
+              </button>
+            )}
+            <button
+              type="button"
+              className={`floor-fullscreen-btn ${isFullscreen ? 'floor-fullscreen-btn--active' : ''}`}
+              onClick={toggleFullscreen}
+              title={isFullscreen ? 'Exit Fullscreen' : 'View Floor Canvas in Fullscreen'}
             >
               <svg
                 width="17"
                 height="17"
                 viewBox="0 0 24 24"
                 fill="none"
-                stroke={showLiveStream ? '#1d4ed8' : 'currentColor'}
+                stroke="#1d4ed8"
                 strokeWidth="2.5"
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 style={{ flexShrink: 0 }}
               >
-                <path d="M23 7l-7 5 7 5V7z" />
-                <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
               </svg>
-              <span>{showLiveStream ? 'Hide Stream' : 'Live Stream'}</span>
+              <span>{isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}</span>
             </button>
-          )}
-          <button
-            type="button"
-            className={`floor-fullscreen-btn ${isFullscreen ? 'floor-fullscreen-btn--active' : ''}`}
-            onClick={toggleFullscreen}
-            title={isFullscreen ? 'Exit Fullscreen' : 'View Floor Canvas in Fullscreen'}
-          >
-            <svg
-              width="17"
-              height="17"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="#1d4ed8"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              style={{ flexShrink: 0 }}
-            >
-              <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
-            </svg>
-            <span>{isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}</span>
-          </button>
+          </div>
         </div>
 
         <div className={`floor-workspace ${hasSelection ? 'floor-workspace--has-selection' : ''}`}>
-          <div className="floor-canvas-column">
-            <FloorPlanCanvas
-              floor={displayFloor}
-              sessions={sessions}
-              waiterCalls={waiterCalls}
-              cashCalls={cashCalls}
-              reservations={reservationsMap}
-              pendingOrders={pendingOrdersMap}
-              statusFilter={statusFilter}
-              editable={editable}
-              selection={selection}
-              onSelect={(sel) => {
-                setSelection(sel)
-                if (isFullscreen && sel?.type === 'table') {
-                  setShowLiveStream(true)
-                }
-              }}
-              onTableChange={updateTable}
-              onSectionChange={handleSectionChange}
-              onLabelChange={handleLabelChange}
-            />
+          <div className="floor-canvas-column" style={{ position: 'relative' }}>
+            {/* Floating Digital Twin Overlays & HUD Telemetry */}
+            {isTwinMode && showTwinOverlays && (
+              <DigitalTwinOverlayControl
+                floating={true}
+                onClose={() => setShowTwinOverlays(false)}
+                settings={twinOverlaySettings}
+                onToggle={(key) => setTwinOverlaySettings((prev) => ({ ...prev, [key]: !prev[key] }))}
+                onOpenReplay={() => setShowReplayModal(true)}
+                onOpenSimulation={() => setShowSimulationModal(true)}
+                syncHash={twinSnapshot?.sync?.reconciliation_hash}
+                lastSyncTime={twinSnapshot?.sync?.synchronized_at}
+              />
+            )}
+            {isTwinMode && twinViewMode === '3D' ? (
+              <IsometricFloorPlanView
+                floor={displayFloor}
+                tables={twinSnapshot?.tables || displayFloor.tables}
+                spatialAnalysis={twinSnapshot?.spatial_analysis}
+                selectedTableId={selection?.type === 'table' ? selection.id : null}
+                onSelectTable={(id) => {
+                  setSelection({ type: 'table', id })
+                  if (isFullscreen) {
+                    setShowLiveStream(true)
+                  }
+                }}
+                onAddTable={async (payload) => {
+                  await addTable(payload)
+                  fetchTwinSnapshot()
+                }}
+                cctvOnline={Boolean(twinSnapshot?.cameras?.[0]?.is_online ?? true)}
+              />
+            ) : (
+              <FloorPlanCanvas
+                floor={displayFloor}
+                sessions={sessions}
+                waiterCalls={waiterCalls}
+                cashCalls={cashCalls}
+                reservations={reservationsMap}
+                pendingOrders={pendingOrdersMap}
+                twinOverlayMap={twinOverlayMap}
+                statusFilter={statusFilter}
+                editable={editable}
+                selection={selection}
+                onSelect={(sel) => {
+                  setSelection(sel)
+                  if (isFullscreen && sel?.type === 'table') {
+                    setShowLiveStream(true)
+                  }
+                }}
+                onTableChange={updateTable}
+                onSectionChange={handleSectionChange}
+                onLabelChange={handleLabelChange}
+              />
+            )}
           </div>
           <aside className="floor-side-column">
             {layoutSelection ? (
@@ -736,6 +876,24 @@ export function FloorPage() {
           onConfirm={handleReset}
           onCancel={() => setConfirmReset(false)}
         />
+
+        {/* Digital Twin Historical Replay Modal */}
+        {floor && (
+          <DigitalTwinReplayModal
+            floorId={floor.id}
+            isOpen={showReplayModal}
+            onClose={() => setShowReplayModal(false)}
+          />
+        )}
+
+        {/* Digital Twin What-If Simulation Modal */}
+        {floor && (
+          <DigitalTwinSimulationModal
+            floor={floor}
+            isOpen={showSimulationModal}
+            onClose={() => setShowSimulationModal(false)}
+          />
+        )}
       </div>
     </div>
   )

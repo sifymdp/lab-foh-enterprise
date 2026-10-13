@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { aiApi, type AIProviderStatus, type ChatAction, type ChatMessage, type RAGCitation } from '../../api/extensions'
 import { useAuth } from '../../context/AuthContext'
 import { useFloor } from '../../context/FloorContext'
+import { AIBotIcon } from '../common/AIBotIcon'
 
 interface ChatEntry extends ChatMessage {
   actions?: ChatAction[]
@@ -231,7 +232,8 @@ export function AIChatWidget() {
           >
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <strong style={{ fontSize: 15, letterSpacing: '-0.01em' }}>✦ FOH Assistant</strong>
+                <AIBotIcon size={22} lightMode={true} />
+                <strong style={{ fontSize: 15, letterSpacing: '-0.01em' }}>FOH Assistant</strong>
                 <button
                   type="button"
                   onClick={() => setShowConfig((v) => !v)}
@@ -812,29 +814,28 @@ export function AIChatWidget() {
           position: 'fixed',
           bottom: 24,
           right: 20,
-          width: 56,
-          height: 56,
+          width: 58,
+          height: 58,
           borderRadius: '50%',
-          border: 'none',
+          border: '1.5px solid rgba(255, 255, 255, 0.35)',
           cursor: 'pointer',
-          background: 'linear-gradient(135deg, #2563eb, #7c3aed)',
+          background: 'linear-gradient(135deg, #1e293b, #0f172a)',
           color: '#fff',
-          fontSize: 22,
-          boxShadow: '0 10px 25px rgba(37, 99, 235, 0.4)',
+          boxShadow: '0 10px 25px rgba(15, 23, 42, 0.5), 0 0 15px rgba(56, 189, 248, 0.35)',
           zIndex: 1000,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          transition: 'transform 0.15s ease',
+          transition: 'transform 0.15s ease, box-shadow 0.2s ease',
         }}
         onMouseEnter={(e) => {
-          e.currentTarget.style.transform = 'scale(1.05)'
+          e.currentTarget.style.transform = 'scale(1.08)'
         }}
         onMouseLeave={(e) => {
           e.currentTarget.style.transform = 'scale(1)'
         }}
       >
-        {open ? '✕' : '✦'}
+        {open ? <span style={{ fontSize: 20 }}>✕</span> : <AIBotIcon size={36} lightMode={true} />}
       </button>
     </>
   )

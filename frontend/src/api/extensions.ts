@@ -240,10 +240,15 @@ export const ordersApi = {
     if (params?.approvalStatus) q.set('approval_status', params.approvalStatus)
     return apiFetch<Order[]>(`/orders?${q}`)
   },
-  place: (tableId: string, items: { menuItemId: string; quantity: number }[], sessionId?: string) =>
+  place: (
+    tableId: string,
+    items: { menuItemId: string; quantity: number; notes?: string }[],
+    sessionId?: string,
+    notes?: string,
+  ) =>
     apiFetch<Order>('/orders', {
       method: 'POST',
-      body: JSON.stringify({ tableId, items, sessionId }),
+      body: JSON.stringify({ tableId, items, sessionId, notes }),
     }),
   approve: (orderId: string) =>
     apiFetch<Order>(`/orders/${orderId}/approve`, { method: 'POST' }),

@@ -67,7 +67,8 @@ def sync_operational_history_to_rag(
             dur = (s.closed_at - s.seated_at).total_seconds() / 60.0
             if dur > 70.0:
                 long_count += 1
-                table_num = s.table.number if s.table else "Unknown"
+                table_obj = getattr(s, "table", None) or (db.get(Table, s.table_id) if hasattr(s, "table_id") else None)
+                table_num = table_obj.number if table_obj else "Unknown"
                 lines.append(
                     f"- Table {table_num}: Party of {s.party_size or 2} occupied table for {round(dur)} mins "
                     f"(Seated {s.seated_at.strftime('%Y-%m-%d %H:%M')}). Exceeded target turnaround."

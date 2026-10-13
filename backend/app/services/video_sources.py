@@ -455,18 +455,31 @@ class YouTubeSource(BaseVideoSource):
         self._consecutive_fails: int = 0
 
     def _extract_stream(self) -> tuple[bool, str | None, str | None]:
+        import re
         u = (self.stream_url or "").strip()
-        if len(u) < 15 or not ("youtube.com" in u.lower() or "youtu.be" in u.lower()):
+        if len(u) < 18 or not ("youtube.com" in u.lower() or "youtu.be" in u.lower()):
             return False, None, "Invalid or incomplete YouTube URL."
+
+        # Require a valid video or live stream identifier (at least 8 chars)
+        has_id = bool(re.search(r"(?:v=|/live/|/shorts/|youtu\.be/)[a-zA-Z0-9_-]{8,}", u))
+        if not has_id:
+            return False, None, "Incomplete YouTube video or live stream URL."
 
         try:
             import yt_dlp
+
+            class _SilentYTDLPLogger:
+                def debug(self, msg): pass
+                def warning(self, msg): pass
+                def error(self, msg): pass
+
             ydl_opts = {
                 "extractor_args": {"youtube": {"player_client": ["android", "web", "mweb", "ios"]}},
                 "quiet": True,
                 "no_warnings": True,
                 "skip_download": True,
                 "socket_timeout": 6,
+                "logger": _SilentYTDLPLogger(),
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(self.stream_url, download=False)

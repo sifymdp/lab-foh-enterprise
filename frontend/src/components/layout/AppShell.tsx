@@ -244,6 +244,16 @@ export function AppShell() {
     // Operational Insights — Owner and Manager
     if (role === 'OWNER' || role === 'MANAGER') items.push(insights)
 
+    // Digital Twin Workspace
+    const digitalTwin = { to: '/digital-twin', label: 'Digital Twin', icon: '🌐' }
+    items.push(digitalTwin)
+
+    // Autonomous Backend Health Guardian
+    if (role === 'OWNER' || role === 'MANAGER') {
+      const healthGuardian = { to: '/health-guardian', label: 'Health Guardian', icon: '🛡' }
+      items.push(healthGuardian)
+    }
+
     return items
   }
 

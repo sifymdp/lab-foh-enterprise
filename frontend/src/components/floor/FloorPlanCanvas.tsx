@@ -14,6 +14,7 @@ interface FloorPlanCanvasProps {
   cashCalls?: Record<string, { state: 'CALLING' | 'ON_IT'; guestName?: string; amount?: number; message?: string }>
   reservations?: Record<string, TableReservationInfo>
   pendingOrders?: Record<string, number>
+  twinOverlayMap?: Record<string, import('./TableMarker').TableTwinOverlayData>
   statusFilter?: import('../../types').TableStatus | null
   editable: boolean
   selection: CanvasSelection
@@ -30,6 +31,7 @@ export function FloorPlanCanvas({
   cashCalls = {},
   reservations = {},
   pendingOrders = {},
+  twinOverlayMap = {},
   statusFilter,
   editable,
   selection,
@@ -99,6 +101,7 @@ export function FloorPlanCanvas({
         isDimmed={isDimmed}
         reservation={reservations[table.id]}
         pendingOrdersCount={pendingOrders[table.id] || 0}
+        twinData={twinOverlayMap[table.id]}
         selected={selection?.type === 'table' && selection.id === table.id}
         editable={editable}
         onSelect={(id) => onSelect({ type: 'table', id })}

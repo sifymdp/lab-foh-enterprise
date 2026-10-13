@@ -69,6 +69,21 @@ from app.models.rag import (
     RAGFeedback,
 )
 
+# Enterprise Backend Health Guardian Models
+from app.models.health_guardian import (
+    HealthAudit,
+    HealthCheckResult,
+    SystemIncident,
+    RecoveryActionLog,
+    HealthAlert,
+)
+
+# Restaurant Digital Twin Models
+from app.models.digital_twin import (
+    DigitalTwinSnapshot,
+    DigitalTwinSimulation,
+)
+
 __all__ = [
     "User",
     "Organization",
@@ -128,5 +143,13 @@ __all__ = [
     "KnowledgeChunk",
     "RAGQueryLog",
     "RAGFeedback",
+    "HealthAudit",
+    "HealthCheckResult",
+    "SystemIncident",
+    "RecoveryActionLog",
+    "HealthAlert",
+    "DigitalTwinSnapshot",
+    "DigitalTwinSimulation",
 ]
+
 

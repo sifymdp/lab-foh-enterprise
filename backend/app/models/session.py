@@ -54,3 +54,6 @@ class DiningSession(Base):
     bill: Mapped["Bill | None"] = relationship(  # noqa: F821
         "Bill", back_populates="session", uselist=False
     )
+    table: Mapped["Table"] = relationship(  # noqa: F821
+        "Table", foreign_keys=[table_id]
+    )

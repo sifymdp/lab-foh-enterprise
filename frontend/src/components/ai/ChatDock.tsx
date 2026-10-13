@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { aiApi, type ChatMessage } from '../../api/extensions'
+import { AIBotIcon } from '../common/AIBotIcon'
 
 const SUGGESTIONS = [
   'How is the floor looking?',
@@ -53,9 +54,10 @@ export function ChatDock() {
         className="chat-fab"
         onClick={() => setOpen(true)}
         aria-label="Open floor assistant"
+        style={{ display: 'flex', alignItems: 'center', gap: 6 }}
       >
-        <span aria-hidden>💬</span>
-        Assistant
+        <AIBotIcon size={20} />
+        <span>Assistant</span>
       </button>
     )
   }
@@ -63,11 +65,14 @@ export function ChatDock() {
   return (
     <section className="chat-dock" aria-label="Floor assistant">
       <header className="chat-dock__head">
-        <div>
-          <strong>Floor Assistant</strong>
-          <span className="chat-dock__sub">
-            {offline ? 'Answering from live floor data' : 'AI · live floor data'}
-          </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <AIBotIcon size={22} lightMode={true} />
+          <div>
+            <strong>Floor Assistant</strong>
+            <span className="chat-dock__sub">
+              {offline ? 'Answering from live floor data' : 'AI · live floor data'}
+            </span>
+          </div>
         </div>
         <button
           type="button"

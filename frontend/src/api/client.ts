@@ -1032,6 +1032,68 @@ export const api = {
       body: JSON.stringify({ reason }),
     })
   },
+
+  // ── Digital Twin Endpoints ──
+  getDigitalTwinSnapshot(floorId: string): Promise<any> {
+    return apiFetch(`/digital-twin/snapshot/${floorId}`)
+  },
+
+  getDigitalTwinReplay(floorId: string, startTime?: string, endTime?: string): Promise<any> {
+    const params = new URLSearchParams()
+    if (startTime) params.set('start_time', startTime)
+    if (endTime) params.set('end_time', endTime)
+    const qs = params.toString() ? `?${params.toString()}` : ''
+    return apiFetch(`/digital-twin/replay/${floorId}${qs}`)
+  },
+
+  createSimulation(payload: { floor_id: string; name: string; scenario_type: string; assumptions: any }): Promise<any> {
+    return apiFetch('/digital-twin/simulations', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  },
+
+  getSimulations(floorId?: string): Promise<any[]> {
+    const qs = floorId ? `?floor_id=${floorId}` : ''
+    return apiFetch(`/digital-twin/simulations${qs}`)
+  },
+
+  getSimulation(simulationId: string): Promise<any> {
+    return apiFetch(`/digital-twin/simulations/${simulationId}`)
+  },
+
+  compareSimulations(simulationIdA: string, simulationIdB: string): Promise<any> {
+    return apiFetch('/digital-twin/simulations/compare', {
+      method: 'POST',
+      body: JSON.stringify({ simulation_id_a: simulationIdA, simulation_id_b: simulationIdB }),
+    })
+  },
+
+  // ── Health Guardian Endpoints ──
+  getHealthGuardianStatus(): Promise<any> {
+    return apiFetch('/health-guardian/status')
+  },
+
+  getHealthGuardianAudits(limit = 20): Promise<any[]> {
+    return apiFetch(`/health-guardian/audits?limit=${limit}`)
+  },
+
+  getHealthGuardianIncidents(statusFilter?: string): Promise<any[]> {
+    const qs = statusFilter ? `?status_filter=${statusFilter}` : ''
+    return apiFetch(`/health-guardian/incidents${qs}`)
+  },
+
+  triggerHealthGuardianAudit(): Promise<any> {
+    return apiFetch('/health-guardian/trigger-audit', { method: 'POST' })
+  },
+
+  resolveHealthGuardianIncident(incidentId: string, notes: string = 'Resolved'): Promise<any> {
+    return apiFetch(`/health-guardian/resolve-incident/${incidentId}`, {
+      method: 'POST',
+      body: JSON.stringify({ notes }),
+    })
+  },
 }
+
 
 

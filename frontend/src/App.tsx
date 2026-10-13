@@ -37,6 +37,8 @@ import { KDSPage } from './pages/KDSPage'
 import { KitchenPage } from './pages/KitchenPage'
 import { AIBookingPage } from './pages/AIBookingPage'
 import { AIAlertsPage } from './pages/AIAlertsPage'
+import { DigitalTwinPage } from './pages/DigitalTwinPage'
+import { HealthGuardianPage } from './pages/HealthGuardianPage'
 
 function DashboardSwitcher() {
   const { user } = useAuth()
@@ -114,6 +116,8 @@ export default function App() {
                 <Route path="waiter" element={<WaiterDashboard />} />
                 <Route path="host" element={<HostDashboard />} />
                 <Route path="booking" element={<AIBookingPage />} />
+                <Route path="digital-twin" element={<DigitalTwinPage />} />
+                <Route path="health-guardian" element={<HealthGuardianPage />} />
                 <Route path="users" element={<UsersPage />} />
                 <Route element={<OwnerRoute />}>
                   <Route path="roles" element={<RolesPage />} />

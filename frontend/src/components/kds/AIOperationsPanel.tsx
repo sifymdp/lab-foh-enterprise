@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { API_URL, getToken } from '../../api/client'
 import type { KitchenOrder } from '../../types'
+import { AIBotIcon } from '../common/AIBotIcon'
 
 interface SpeechRecognitionEventLike extends Event {
   results: ArrayLike<{ 0: { transcript: string } }>
@@ -183,8 +184,8 @@ export function AIOperationsPanel({ orders }: AIOperationsPanelProps) {
     <section className="kds-ai-panel" aria-label="AI kitchen copilot">
       <div className="kds-ai-panel__heading">
         <div className="kds-ai-panel__title-box">
-          <div className="kds-ai-panel__badge">
-            <span>✨</span>
+          <div className="kds-ai-panel__badge" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <AIBotIcon size={16} />
             <span>AI COPILOT</span>
           </div>
           <h3 className="kds-ai-panel__title">Smart Kitchen Intelligence</h3>

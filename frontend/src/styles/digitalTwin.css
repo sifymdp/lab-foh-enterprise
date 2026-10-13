@@ -1,0 +1,500 @@
+/* ── Restaurant Digital Twin & Health Guardian Styles ── */
+
+/* Dual Mode Toggle Button on Floor Plan */
+.btn-twin-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.9rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  border: 1.5px solid #0284c7;
+  background: #f0f9ff;
+  color: #0369a1;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+}
+
+.btn-twin-toggle:hover {
+  background: #e0f2fe;
+  border-color: #0369a1;
+}
+
+.btn-twin-toggle--active {
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  color: #38bdf8;
+  border-color: #38bdf8;
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.35);
+}
+
+.twin-pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #22c55e;
+  box-shadow: 0 0 8px #22c55e;
+  display: inline-block;
+  animation: twinPulse 1.8s infinite;
+}
+
+@keyframes twinPulse {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); }
+  70% { transform: scale(1.15); box-shadow: 0 0 0 6px rgba(34, 197, 94, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+}
+
+/* Digital Twin HUD Floor Canvas Wrapper — matches existing project theme */
+.floor-display-wrapper--twin-mode {
+  background: var(--surface) !important;
+  border: 1px solid var(--border-strong) !important;
+  box-shadow: var(--shadow-sm) !important;
+  border-radius: var(--radius-lg);
+  position: relative;
+  transition: all 0.3s ease;
+}
+
+.floor-display-wrapper--twin-mode .floor-plan-grid {
+  background-image: 
+    linear-gradient(#e2e8f0 1px, transparent 1px),
+    linear-gradient(90deg, #e2e8f0 1px, transparent 1px) !important;
+  background-size: 24px 24px !important;
+}
+
+.twin-hud-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  background: #f8fafc;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  border-top-left-radius: 12px;
+  border-top-right-radius: 12px;
+}
+
+.twin-hud-header--floating {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 45;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.18), 0 8px 10px -6px rgba(15, 23, 42, 0.1);
+  padding: 0.65rem 0.9rem;
+  max-width: min(680px, calc(100% - 24px));
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  animation: twinHudSlideIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes twinHudSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.twin-hud-close-btn {
+  background: transparent;
+  border: none;
+  font-size: 0.9rem;
+  line-height: 1;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #64748b;
+  transition: all 0.15s ease;
+}
+
+.twin-hud-close-btn:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+
+.twin-hud-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.25rem 0.65rem;
+  border-radius: 6px;
+  background: #e0f2fe;
+  color: #0369a1;
+  border: 1px solid #bae6fd;
+}
+
+.twin-overlay-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.twin-overlay-btn {
+  background: #ffffff;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.35rem 0.7rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.twin-overlay-btn:hover {
+  color: #0f172a;
+  background: #f1f5f9;
+  border-color: #94a3b8;
+}
+
+.twin-overlay-btn--active {
+  background: #0284c7;
+  color: #ffffff;
+  border-color: #0284c7;
+  box-shadow: 0 2px 4px rgba(2, 132, 199, 0.3);
+}
+
+/* Operational Badges on Table Markers in Twin Mode */
+.table-marker-twin-overlay {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  z-index: 5;
+}
+
+.twin-duration-pill {
+  background: #0284c7;
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+
+.twin-duration-pill--warning {
+  background: #ea580c;
+  animation: twinPulse 1.5s infinite;
+}
+
+.twin-kitchen-badge {
+  background: #e11d48;
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 6px;
+}
+
+.twin-vision-confidence {
+  position: absolute;
+  bottom: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(15, 23, 42, 0.9);
+  color: #38bdf8;
+  font-size: 0.62rem;
+  font-weight: 600;
+  padding: 1px 4px;
+  border-radius: 4px;
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Timeline Replay Scrubber Container */
+.twin-replay-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  border-radius: 10px;
+  padding: 0.65rem 1rem;
+  margin-top: 0.75rem;
+  color: #f8fafc;
+}
+
+.twin-replay-slider {
+  flex: 1;
+  accent-color: #38bdf8;
+  cursor: pointer;
+}
+
+/* Health Guardian Dashboard UI */
+.guardian-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.guardian-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.guardian-card--pass {
+  border-left: 4px solid var(--success);
+}
+
+.guardian-card--warn {
+  border-left: 4px solid #f59e0b;
+}
+
+.guardian-card--fail {
+  border-left: 4px solid var(--danger);
+}
+
+.guardian-header-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.25rem;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  color: #f8fafc;
+  box-shadow: var(--shadow-md);
+  margin-bottom: 1.5rem;
+}
+
+/* ── 3D Isometric Digital Twin Visualizer ── */
+@keyframes flowMarch {
+  from {
+    stroke-dashoffset: 28;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.animated-flow-line {
+  animation: flowMarch 1.2s linear infinite;
+}
+
+.iso-digital-twin-container {
+  background: radial-gradient(circle at 50% 35%, #0b1329 0%, #030712 100%);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6), inset 0 0 60px rgba(56, 189, 248, 0.05);
+}
+
+.twin-view-mode-toggle {
+  display: inline-flex;
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  border-radius: 8px;
+  padding: 3px;
+  gap: 3px;
+}
+
+.twin-view-mode-btn {
+  padding: 0.35rem 0.75rem;
+  border-radius: 6px;
+  border: none;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  background: transparent;
+  color: #94a3b8;
+  transition: all 0.2s ease;
+}
+
+.twin-view-mode-btn--active {
+  background: #0284c7;
+  color: #ffffff;
+  box-shadow: 0 1px 4px rgba(2, 132, 199, 0.4);
+}
+
+/* ── Light Architectural Theme Mode ── */
+.iso-digital-twin-container--light {
+  background: radial-gradient(circle at 50% 30%, #f8fafc 0%, #e2e8f0 100%) !important;
+  border: 1px solid #cbd5e1 !important;
+  box-shadow: 0 12px 36px rgba(100, 116, 139, 0.2), inset 0 0 60px rgba(255, 255, 255, 0.8) !important;
+}
+
+.iso-digital-twin-container--light .twin-overlay-btn {
+  background: rgba(255, 255, 255, 0.9);
+  color: #334155;
+  border: 1px solid #cbd5e1;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+
+.iso-digital-twin-container--light .twin-overlay-btn:hover {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+  color: #0f172a;
+}
+
+.iso-digital-twin-container--light .twin-overlay-btn--active {
+  background: #0284c7;
+  color: #ffffff;
+  border-color: #0284c7;
+  box-shadow: 0 2px 6px rgba(2, 132, 199, 0.35);
+}
+
+/* Floating Tag Badges Matching Reference Image */
+.iso-tag-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: #ffffff;
+  border: 1.5px solid #0284c7;
+  padding: 2px 7px;
+  border-radius: 6px;
+  color: #0f172a;
+  font-size: 0.72rem;
+  font-weight: 700;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.1);
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.iso-tag-pill:hover {
+  transform: scale(1.08);
+  border-color: #0284c7;
+}
+
+/* Floating Inspector Card Matching Project Light Theme */
+.iso-telemetry-inspector-card {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 25;
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  padding: 0.85rem 1.1rem;
+  color: #0f172a;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+  min-width: 260px;
+}
+
+.iso-telemetry-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 0.5rem;
+  margin: 0.5rem 0 0.8rem;
+  text-align: center;
+  border-top: 1px solid #e2e8f0;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 0.45rem 0;
+}
+
+.iso-telemetry-stat-label {
+  font-size: 0.65rem;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+
+.iso-telemetry-stat-value {
+  font-size: 0.95rem;
+  font-weight: 700;
+  margin-top: 2px;
+  color: #0f172a;
+}
+
+.iso-telemetry-btn-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.iso-telemetry-action-btn {
+  flex: 1;
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 0.4rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #334155;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  transition: all 0.15s ease;
+}
+
+.iso-telemetry-action-btn:hover {
+  background: #0284c7;
+  border-color: #0284c7;
+  color: #ffffff;
+}
+
+/* Bottom Controls Toolbar Matching Project Light Theme */
+.iso-bottom-controls-bar {
+  position: absolute;
+  bottom: 14px;
+  left: 14px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 0.35rem 0.65rem;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08);
+}
+
+.iso-bottom-ctrl-btn {
+  background: transparent;
+  border: none;
+  color: #475569;
+  font-size: 0.75rem;
+  font-weight: 600;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+}
+
+.iso-bottom-ctrl-btn:hover {
+  color: #0f172a;
+  background: #f1f5f9;
+}
+
+.iso-bottom-ctrl-btn--active {
+  color: #0284c7;
+  background: #e0f2fe;
+}
+
+

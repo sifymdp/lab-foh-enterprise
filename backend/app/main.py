@@ -10,6 +10,19 @@ from fastapi.middleware.cors import CORSMiddleware
 # pipeline runs silently and problems are invisible.
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
+# Passlib 1.7.4 + bcrypt 4.1+ compatibility patch (eliminates trapped AttributeError in passlib)
+try:
+    import bcrypt
+    if not hasattr(bcrypt, "__about__"):
+        class _BcryptAbout:
+            __version__ = getattr(bcrypt, "__version__", "4.0.1")
+        bcrypt.__about__ = _BcryptAbout()
+except Exception:
+    pass
+
+import warnings
+warnings.filterwarnings("ignore", message=".*Python version 3.10 has been deprecated.*")
+
 from app.core import camera_utils
 from app.core.yolo_models import load_models, unload_models
 from app.config import settings
@@ -44,9 +57,11 @@ from app.routers import (
     ai_waitlist,
     voice,
     rag,
+    digital_twin,
+    health_guardian,
 )
 from app.seed import seed_database
-from app.workers import camera_worker
+from app.workers import camera_worker, guardian_worker
 
 
 import asyncio
@@ -79,6 +94,7 @@ async def lifespan(_app: FastAPI):
     models_loaded = load_models()
     if models_loaded:
         camera_worker.start_worker()
+    guardian_worker.start_worker()
     alert_task = asyncio.create_task(_kitchen_alerts_background_task())
     yield
     # ── Graceful shutdown ──
@@ -86,6 +102,10 @@ async def lifespan(_app: FastAPI):
     try:
         await asyncio.wait_for(alert_task, timeout=1.0)
     except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
+        pass
+    try:
+        await asyncio.wait_for(guardian_worker.stop_worker(), timeout=2.0)
+    except Exception:
         pass
     # Stop stream workers first to prevent CancelledError cascades
     # from active StreamingResponse connections during shutdown.
@@ -178,6 +198,8 @@ app.include_router(ai_timeslot.router)
 app.include_router(ai_waitlist.router)
 app.include_router(voice.router)
 app.include_router(rag.router)
+app.include_router(digital_twin.router)
+app.include_router(health_guardian.router)
 
 
 

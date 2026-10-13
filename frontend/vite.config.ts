@@ -53,7 +53,7 @@ export default defineConfig({
       '/vision': apiProxy,
       '/stream': streamProxy,
       '/health': apiProxy,
-      '/ai': apiProxy,
+      '^/ai(/|$)': apiProxy,
       '/customer': apiProxy,
       '/ai-booking': apiProxy,
       '/ai-timeslot': apiProxy,

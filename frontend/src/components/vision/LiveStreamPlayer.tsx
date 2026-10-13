@@ -42,12 +42,32 @@ export function LiveStreamPlayer({
   const activeReqRef = useRef<AbortController | null>(null)
   const mountedRef = useRef(true)
 
+  // Debounce cameraUrl updates so typing in input doesn't flood backend with partial URLs
+  const [debouncedUrl, setDebouncedUrl] = useState(cameraUrl || '')
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedUrl(cameraUrl || '')
+    }, 450)
+    return () => clearTimeout(handler)
+  }, [cameraUrl])
+
+  const isUrlValid = useCallback((url: string, type: string) => {
+    const trimmed = (url || '').trim()
+    if (!trimmed) return true
+    if (type === 'WEBCAM') return /^[0-9]+$/.test(trimmed)
+    if (type === 'VIDEO_FILE') return trimmed.length > 3
+    if (trimmed.includes('youtube.com') || trimmed.includes('youtu.be')) {
+      return /(?:v=|\/live\/|\/shorts\/|youtu\.be\/)[a-zA-Z0-9_-]{8,}/.test(trimmed)
+    }
+    return trimmed.length >= 8
+  }, [])
+
   // Determine base path: prefer direct port 8000 on development to completely bypass proxy buffering
   const backendOrigin = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
     ? `http://${window.location.hostname}:8000`
     : ''
   const baseHost = useDirectBackend ? '' : (backendOrigin || '')
-  const encodedUrl = encodeURIComponent(cameraUrl || '')
+  const encodedUrl = encodeURIComponent(debouncedUrl || '')
   const mjpegSrc = `${baseHost}/stream/${floorId}?camera_id=${cameraId || ''}&stream_url=${encodedUrl}&source_type=${sourceType || 'RTSP'}&nonce=${nonce}`
   const singleFrameSrc = `${baseHost}/stream/${floorId}/frame?camera_id=${cameraId || ''}&stream_url=${encodedUrl}&source_type=${sourceType || 'RTSP'}`
 
@@ -67,7 +87,7 @@ export function LiveStreamPlayer({
     setStatus('connecting')
     setRetryCount(0)
     setNonce((n) => n + 1)
-  }, [floorId, cameraId, cameraUrl, sourceType, streamMode, useDirectBackend])
+  }, [floorId, cameraId, debouncedUrl, sourceType, streamMode, useDirectBackend])
 
   // ══════════════════════════════════════════════════════════════════════════
   // 1. PRIMARY ENGINE: Continuous Canvas Frame Stream (Universal, Brave/Chrome immune)
@@ -82,6 +102,10 @@ export function LiveStreamPlayer({
 
     const pumpNextFrame = async () => {
       if (!active || !mountedRef.current || isFetching) return
+      if (!isUrlValid(debouncedUrl, sourceType)) {
+        pollTimerRef.current = setTimeout(pumpNextFrame, 500)
+        return
+      }
       isFetching = true
 
       const controller = new AbortController()
